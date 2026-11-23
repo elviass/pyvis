@@ -1,0 +1,32 @@
+[
+  {
+    "filename": "ruff-0.17.5-py3-none-macosx_10_12_x86_64.whl",
+    "sha256": "b72fbc232e328bdbb9cdddf4f1aedcd61bd1aa64d75fc012114b4add0bd7f26b",
+    "url": "https://files.pythonhosted.org/packages/d1/72/8ed970f3361f7c8d3f8e1b3b1af27cf086bc4b3a6b62ec20e21a1aaaaff5/ruff-0.17.5-py3-none-macosx_10_12_x86_64.whl"
+  },
+  {
+    "filename": "ruff-0.17.5-py3-none-macosx_11_0_arm64.whl",
+    "sha256": "6f0db748508f04a04e3fbebcc636a5c8b3bd76274f8ed28f497c44d75c2ea2d7",
+    "url": "https://files.pythonhosted.org/packages/dc/4b/8b10f6c9d0a18413301ae8dd2af9d180a81bb738b1b731d944a37404c523/ruff-0.17.5-py3-none-macosx_11_0_arm64.whl"
+  },
+  {
+    "filename": "ruff-0.17.5-py3-none-win_amd64.whl",
+    "sha256": "aa415d57c244299279901d776607fee3df7831c2a7435433fbfacde8632c6550",
+    "url": "https://files.pythonhosted.org/packages/ec/8c/e4db9ae1e0ee233c04df007ab6d0d42f799ae9abd95d352b6092ee7bc4bf/ruff-0.17.5-py3-none-win_amd64.whl"
+  },
+  {
+    "filename": "ty-0.0.104-py3-none-macosx_10_12_x86_64.whl",
+    "sha256": "d83988dd0ace56c133417a976b798844c4c3f6b9e28b2856e5026432a6d907ee",
+    "url": "https://files.pythonhosted.org/packages/db/61/2b8c8fa58bfd59ccb31b430e2798515fd9f6f7e19139f804a1bd4ecc18ff/ty-0.0.104-py3-none-macosx_10_12_x86_64.whl"
+  },
+  {
+    "filename": "ty-0.0.104-py3-none-macosx_11_0_arm64.whl",
+    "sha256": "bab34539aedf4fb5dfcc9724874bce05fc79cb85cb783b1084e8615d4e6d6755",
+    "url": "https://files.pythonhosted.org/packages/20/df/7b3865d367b83cce6411857f8769e05bd625034adc16d8dabf3f22ee58ad/ty-0.0.104-py3-none-macosx_11_0_arm64.whl"
+  },
+  {
+    "filename": "ty-0.0.104-py3-none-win_amd64.whl",
+    "sha256": "ae5f746b4c800f202f8dae94957cc6dacbf3f4b19bd2b2d0df013043fb8af856",
+    "url": "https://files.pythonhosted.org/packages/d8/ff/5fbb55f4afedc80e319d41927589c0c80325ed3e0e525f682684d3351c76/ty-0.0.104-py3-none-win_amd64.whl"
+  }
+]

@@ -1,0 +1,5 @@
+Interface reference assets: JetBrains PyCharm 2026.2.3 local installation. IntelliJ Platform new UI icons and Python plugin icons, copyright JetBrains. JetBrains Mono font, copyright JetBrains, SIL Open Font License 1.1. These files preserve the source vectors and font without redrawing.
+
+Inspection colors reference the installed PyCharm 2026.2.3 Islands Dark scheme. Wave geometry reimplements the one-pixel amplitude/four-pixel period convention of JetBrains WavePainter2D (Copyright 2000-2020 JetBrains s.r.o., Apache 2.0): https://github.com/JetBrains/intellij-community/blob/95e604c033cd5cb6a267bf816c4d9c430b1b4c0e/platform/util/ui/src/com/intellij/util/ui/WavePainter2D.java. License: ide/JetBrains-Apache-2.0.txt.
+
+Local inline completion uses the Qwen2.5-Coder-0.5B base model under Apache-2.0 (Qwen-Apache-2.0.txt), quantized by bartowski as Q5_K_M at revision 01c1b8072277dfbfd0d051ec95b7a43bb23d2f6a. Inference uses llama.cpp b12470 under MIT (llama.cpp-MIT.txt). Artifact hashes and source URLs are pinned in tools/local_completion_manifest.json.

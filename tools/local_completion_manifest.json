@@ -1,0 +1,22 @@
+{
+  "engine": "llama.cpp",
+  "version": "b12470",
+  "servers": {
+    "macos-arm64": {
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12470/llama-b12470-bin-macos-arm64.tar.gz",
+      "sha256": "23e0c4f1705e01519f094a3d4ce3194cead4251f862137e996173b74b73d2404"
+    },
+    "macos-x64": {
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12470/llama-b12470-bin-macos-x64.tar.gz",
+      "sha256": "58e935bf5974a649929b15ff8ebdfa6dd11894fdb0486f5b8d52a13584849ee4"
+    }
+  },
+  "model": {
+    "name": "Qwen2.5-Coder-0.5B Q5_K_M",
+    "filename": "qwen2.5-coder-0.5b-q5_k_m.gguf",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/bartowski/Qwen2.5-Coder-0.5B-GGUF/resolve/01c1b8072277dfbfd0d051ec95b7a43bb23d2f6a/Qwen2.5-Coder-0.5B-Q5_K_M.gguf?download=true",
+    "sha256": "59fa334682d4125690371970e07994e47b1c1dd151b8f280fcae019df9eeddfc",
+    "size": 420086272
+  }
+}

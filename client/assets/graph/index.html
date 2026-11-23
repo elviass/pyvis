@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+<link rel="stylesheet" href="vendor/litegraph.css"><link rel="stylesheet" href="style.css">
+<title>Python 节点流程</title></head><body>
+<canvas id="graph" tabindex="0" aria-label="Python 节点画布"></canvas>
+<div id="tools" role="toolbar" aria-label="画布工具">
+  <button data-action="readable" title="恢复可读字号">100%</button>
+  <button data-action="out" title="缩小">−</button><span id="zoom">100%</span>
+  <button data-action="in" title="放大">＋</button><button data-action="fit" title="查看全图">全图</button>
+  <button data-action="reset" title="恢复自动布局">整理</button>
+</div>
+<details id="legend">
+  <summary>连线图例</summary>
+  <div id="legend-panel">
+    <div id="flow-key"></div>
+    <div id="type-key" aria-label="数据类型"></div>
+  </div>
+</details>
+<div id="inspector" hidden><button id="close-inspector" aria-label="关闭节点详情">关闭</button><div id="selection-title"></div><pre id="selection-code"></pre>
+  <div id="selection-help"></div><button id="selection-action" hidden></button><div id="selection-structure"></div><div id="selection-connections"></div><button id="selection-origin" hidden>定位变量来源</button></div>
+<div id="hint">拖动标题移动节点 · 拖动空白平移 · 滚轮缩放 · Shift 框选 · 双击展开代码块</div>
+<div id="failure" hidden></div>
+<script src="vendor/litegraph.umd.js"></script><script src="model.js"></script><script src="routing.js"></script><script src="touch.js"></script><script src="canvas.js"></script>
+</body></html>
