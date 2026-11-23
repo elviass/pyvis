@@ -198,6 +198,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await realIo(tester, () => tester.tap(find.byTooltip('直接运行').first));
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     expect(
         tester
             .widget<LineTheater>(find.byType(LineTheater))
@@ -258,6 +260,8 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     final theater = tester.widget<LineTheater>(find.byType(LineTheater));
     expect(
         theater.events
@@ -396,6 +400,11 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    expect(find.byType(ComfyBlueprintPanel), findsNothing);
+    expect(find.byKey(const ValueKey('independent-console')), findsOneWidget);
+    expect(find.textContaining('ZeroDivisionError'), findsWidgets);
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     final theater = tester.widget<LineTheater>(find.byType(LineTheater));
     expect(theater.events.any((e) => '${e['file']}'.endsWith('helper.py')),
         isTrue);
@@ -660,6 +669,8 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     final original =
         tester.widget<LineTheater>(find.byType(LineTheater)).events;
     final picker = FilePicker.platform as LocalPicker;

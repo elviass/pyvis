@@ -58,6 +58,9 @@ void main() {
     });
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const ValueKey('flow-workspace-graph')), findsNothing);
+    await tester.tap(find.text('代码流程图').first);
+    await tester.pumpAndSettle();
     expect(find.byType(LineTheater), findsOneWidget);
     final theater = tester.widget<LineTheater>(find.byType(LineTheater));
     final target = theater.events.firstWhere((e) =>

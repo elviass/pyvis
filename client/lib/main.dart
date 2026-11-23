@@ -664,8 +664,15 @@ class _EditorPageState extends State<EditorPage> {
         error = value['error'] == null
             ? null
             : Map<String, dynamic>.from(value['error']);
-        status =
-            error == null ? '运行完成 · 可以拖动时间轴回看' : '执行中断 · ${error!['type']}';
+        if (!demo && error != null) {
+          final problem = error!;
+          console += '${problem['type']}：${problem['message']}\n';
+        }
+        status = error != null
+            ? '执行中断 · ${error!['type']}'
+            : blueprintMode
+                ? '运行完成 · 可以拖动时间轴回看'
+                : '运行完成 · 可在代码流程图回看';
         prompt = null;
       } else if (value.containsKey('seq')) {
         events.add(value);
@@ -2367,7 +2374,13 @@ class _EditorPageState extends State<EditorPage> {
         selectedFrame = -1;
         prompt = null;
         running = true;
-        openFlowSession();
+        if (visual) {
+          openFlowSession();
+        } else {
+          showExecution = true;
+          inspectedTraceLine = null;
+          if (!blueprintMode) showConsole = true;
+        }
         playing = false;
         animationsPaused = false;
         demo = visual;
