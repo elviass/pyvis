@@ -15,6 +15,10 @@ class MainActivity : FlutterActivity() {
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         MethodChannel(messenger, "dev.pyvis/workspace", StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue())
             .setMethodCallHandler { call, result ->
+                if (call.method == "recentProjectsPath") {
+                    result.success(File(filesDir, "recent-projects.json").absolutePath)
+                    return@setMethodCallHandler
+                }
                 if (call.method != "prepareExamples") {
                     result.notImplemented()
                     return@setMethodCallHandler

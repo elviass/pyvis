@@ -95,19 +95,34 @@ class _EditorPageState extends State<EditorPage> {
   late bool welcome;
   final recentProjects = <String>[];
   final recentFiles = <String>[];
+  File? androidRecentFile;
+
   File? get recentFile {
+    if (Platform.isAndroid) return androidRecentFile;
     final dir = EditorPreferences.file?.parent;
     return dir == null ? null : File(p.join(dir.path, 'recent-projects.json'));
   }
 
-  void loadRecentProjects() {
+  Future<void> loadRecentProjects() async {
     try {
-      final file = recentFile;
-      if (file != null && file.existsSync()) {
-        recentProjects.addAll((jsonDecode(file.readAsStringSync()) as List)
-            .whereType<String>()
-            .take(15));
+      if (Platform.isAndroid) {
+        final path = await const MethodChannel('dev.pyvis/workspace')
+            .invokeMethod<String>('recentProjectsPath');
+        if (!mounted || path == null) return;
+        androidRecentFile = File(path);
       }
+      final file = recentFile;
+      if (file == null) return;
+      final hasNewProjects = recentProjects.isNotEmpty;
+      if (file.existsSync()) {
+        final stored =
+            (jsonDecode(file.readAsStringSync()) as List).whereType<String>();
+        final merged = {...recentProjects, ...stored}.take(15).toList();
+        recentProjects
+          ..clear()
+          ..addAll(merged);
+      }
+      if (hasNewProjects) saveRecentProjects();
     } on Object {
       return;
     }
@@ -117,6 +132,10 @@ class _EditorPageState extends State<EditorPage> {
     recentProjects.remove(folder);
     recentProjects.insert(0, folder);
     if (recentProjects.length > 15) recentProjects.removeLast();
+    saveRecentProjects();
+  }
+
+  void saveRecentProjects() {
     try {
       final file = recentFile;
       file?.parent.createSync(recursive: true);
@@ -2861,7 +2880,10 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> welcomeExample() async {
     await loadBundledExample();
     if (mounted && p.basename(currentFile ?? '') == '逐行运算.py') {
-      setState(() => welcome = false);
+      setState(() {
+        welcome = false;
+        if (project case final folder?) rememberProject(folder);
+      });
     }
   }
 
