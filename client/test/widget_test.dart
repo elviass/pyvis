@@ -89,9 +89,9 @@ void main() {
     await tester.runAsync(() async {
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      final folder = Directory('../docs');
+      final folder = Directory('build/test-artifacts');
       await folder.create(recursive: true);
-      await File('../docs/desktop-preview.png')
+      await File('build/test-artifacts/desktop-preview.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     expect(tester.takeException(), isNull);

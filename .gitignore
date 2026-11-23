@@ -1,18 +1,17 @@
+# 本机与编辑器配置
 .DS_Store
+.idea/
+
+# Python 与 Flutter 生成内容
 __pycache__/
 *.pyc
 .dart_tool/
 .flutter-plugins-dependencies
 build/
-*.trace.json
-client/.idea/
-
-.idea/
-
 /client/build
+/client/build-before-cache-*/
 
-/client/build-before-cache-20261117/
-
-/runtime/local_completion/
-
+# 执行记录、临时截图和本地模型
+*.trace.json
 /client/test/_tmp_*.png
+/runtime/local_completion/

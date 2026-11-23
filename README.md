@@ -2,6 +2,21 @@
 
 以真实 CPython 执行数据驱动变量、对象和调用栈的学习编辑器。当前是 **0.1 开发原型**，交付路线为 Windows → 安卓 → macOS → iOS。
 
+## 项目目录
+
+| 路径 | 内容 |
+|---|---|
+| [client/lib](client/lib) | Flutter 编辑器、项目操作与流程图界面 |
+| [client/assets](client/assets) | 节点画布、图标和字体 |
+| [client/android](client/android) · [client/macos](client/macos) · [client/windows](client/windows) · [client/ios](client/ios) | 各平台的原生工程 |
+| [runtime/pyvis_runtime](runtime/pyvis_runtime) | Python 执行记录、静态分析和流程图生成 |
+| [examples](examples) | 欢迎页提供的内置示例 |
+| [client/test](client/test) · [tests](tests) | Flutter、Python 与节点画布测试 |
+| [tools](tools) | 平台打包与内置运行环境准备脚本 |
+| [docs](docs) | 架构、验收记录和已归档截图 |
+
+测试生成的界面截图保存在 `client/build/test-artifacts/`，与已归档的文档截图分开存放。构建产物、缓存和本地模型由 Git 忽略。
+
 ## 已实现
 
 - 按本机 PyCharm 的工具栏、项目树、标签页、底部工具窗口布局重做界面，保留 Python 高亮、行号、文件打开与保存、项目入口选择。

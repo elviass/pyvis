@@ -44,6 +44,8 @@ Future<void> parsed(WidgetTester tester, {bool expandWhole = true}) async {
 
 void main() {
   setUpAll(() async {
+    await Directory('build/test-artifacts/graph-review')
+        .create(recursive: true);
     final font = File('/System/Library/Fonts/Supplemental/Arial Unicode.ttf');
     if (font.existsSync()) {
       for (final family in ['.AppleSystemUIFont', 'Roboto', 'monospace']) {
@@ -167,7 +169,7 @@ void main() {
           as RenderRepaintBoundary;
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/03-compact-sample.png')
+      await File('build/test-artifacts/graph-review/03-compact-sample.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(find.byTooltip('缩小流程图'));
@@ -457,7 +459,7 @@ void main() {
             as RenderRepaintBoundary;
         final image = await boundary.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('../docs/graph-review/$file')
+        await File('build/test-artifacts/graph-review/$file')
             .writeAsBytes(bytes!.buffer.asUint8List());
       });
     }
@@ -570,7 +572,7 @@ void main() {
               as RenderRepaintBoundary)
           .toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/11-flow-folded.png')
+      await File('build/test-artifacts/graph-review/11-flow-folded.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(find.byKey(const ValueKey('expand-all-sections')));
@@ -619,7 +621,7 @@ void main() {
               as RenderRepaintBoundary)
           .toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/12-loop-folded.png')
+      await File('build/test-artifacts/graph-review/12-loop-folded.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     expect(tester.takeException(), isNull);
@@ -693,7 +695,7 @@ void main() {
           preview.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/06-menu-loop.png')
+      await File('build/test-artifacts/graph-review/06-menu-loop.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(find.byTooltip('下一个分区'));
@@ -803,7 +805,7 @@ void main() {
               as RenderRepaintBoundary)
           .toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/13-readable-default.png')
+      await File('build/test-artifacts/graph-review/13-readable-default.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(header);
@@ -895,7 +897,7 @@ void main() {
               as RenderRepaintBoundary)
           .toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/14-layered-flow.png')
+      await File('build/test-artifacts/graph-review/14-layered-flow.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(find.byKey(const ValueKey('flow-parent')));
@@ -957,7 +959,7 @@ void main() {
           preview.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/08-menu-narrow.png')
+      await File('build/test-artifacts/graph-review/08-menu-narrow.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.pumpWidget(const SizedBox());
@@ -996,7 +998,7 @@ void main() {
           preview.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final image = await boundary.toImage();
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File('../docs/graph-review/10-precise-explanation.png')
+      await File('build/test-artifacts/graph-review/10-precise-explanation.png')
           .writeAsBytes(bytes!.buffer.asUint8List());
     });
     await tester.tap(find.byKey(const ValueKey('teaching-step-1')));
