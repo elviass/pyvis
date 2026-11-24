@@ -269,7 +269,9 @@ class _CodeAutocompleteState extends State<_CodeAutocomplete> {
     final PreferredSizeWidget child = widget.viewBuilder(context, _notifier!, (result) {
       _onAutocomplete?.call(result);
     });
-    final Size screenSize =  MediaQuery.of(context).size;
+    final media = MediaQuery.of(context);
+    final Size screenSize = media.size;
+    final double visibleBottom = screenSize.height - (kIsAndroid ? media.viewInsets.bottom : 0);
     final double offsetX;
     if (position.dx + child.preferredSize.width > screenSize.width) {
       offsetX = screenSize.width - (position.dx + child.preferredSize.width);
@@ -277,7 +279,7 @@ class _CodeAutocompleteState extends State<_CodeAutocomplete> {
       offsetX = 0;
     }
     final double offsetY;
-    if (position.dy + child.preferredSize.height > screenSize.height) {
+    if (position.dy + child.preferredSize.height > visibleBottom) {
       offsetY = -child.preferredSize.height - lineHeight;
     } else {
       offsetY = 0;
@@ -293,6 +295,7 @@ class _CodeAutocompleteState extends State<_CodeAutocomplete> {
         child: Material(
           color: Colors.transparent,
           child: TapRegion(
+            groupId: widget.controller,
             onTapOutside: (event) {
               dismiss();
             },

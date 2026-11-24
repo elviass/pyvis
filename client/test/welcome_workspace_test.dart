@@ -59,8 +59,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('复制信息'));
     await tester.pump();
-    expect(find.text('Pyvis v0.1.0'), findsOneWidget);
-    expect(copied, startsWith('Pyvis v0.1.0\n'));
+    expect(find.text('Pyvis v0.1.1'), findsOneWidget);
+    expect(copied, startsWith('Pyvis v0.1.1\n'));
     expect(copied, contains('构建号'));
     expect(copied, contains('Dart'));
     expect(find.text('已复制'), findsOneWidget);

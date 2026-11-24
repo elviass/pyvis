@@ -4,17 +4,17 @@
 
 Pyvis 是一款面向 Python 初学者和教学演示的图形化编辑器。你可以编写和运行代码，逐步观察变量如何变化、条件走了哪条分支、函数如何调用和返回。
 
-**v0.1.0 预览版** · Android · macOS · Windows
+**v0.1.1 预览版** · Android · macOS · Windows
 
 ![Pyvis 桌面版界面预览](docs/desktop-preview.png)
 
 ## 获取 Pyvis
 
-| 平台 | 安装或启动 | v0.1.0 验证状态 |
+| 平台 | 安装或启动 | 验证状态 |
 | --- | --- | --- |
 | Android | 安装 `app-release.apk`。支持 Android 7.0 及以上的 arm64-v8a 和 x86_64 设备。 | 已构建并在安卓模拟器验证。 |
 | macOS | 打开 `Pyvis.app`。支持 macOS 12 及以上，应用同时包含 Apple 芯片和 Intel 架构。 | 已构建并在 Apple 芯片 Mac 上运行。 |
-| Windows | 解压便携包，保留完整目录，再打开 `pyvis_editor.exe`。 | 源码提供打包脚本，本轮尚未重新打包或实机验证。 |
+| Windows x64 | 双击 MSI 安装，或解压便携 ZIP 后打开 `pyvis_editor.exe`。 | GitHub Actions 构建并验证两种包。 |
 
 当前安装包由本地构建生成。Android、macOS 和 Windows 的打包流程会嵌入 CPython，使用预置示例时无需单独安装 Python。
 
@@ -60,9 +60,9 @@ flutter build macos --release
 
 产物位于 `client/build/macos/Build/Products/Release/Pyvis.app`。开发模式可在仓库根目录运行 [run_desktop.sh](tools/run_desktop.sh)。
 
-**Windows**（Visual Studio C++ 桌面构建工具）
+**Windows x64**（Visual Studio C++ 桌面构建工具、WiX 6）
 
-在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，产物位于 `client/build/windows/` 下。[Windows 打包脚本](tools/build_windows.ps1)
+在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，默认生成 MSI 和便携 ZIP。可用 `-Format MSI` 或 `-Format Portable` 只构建其中一种。两种包均内置 CPython，产物位于 `client/build/windows/packages/`。MSI 安装到当前用户的 `AppData\Local\Programs\Pyvis`，包含开始菜单入口。GitHub Actions 的 `Pyvis-Windows-x64` 构建产物也提供两个文件。[Windows 打包脚本](tools/build_windows.ps1)
 
 ## 开发资料
 

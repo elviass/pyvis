@@ -58,9 +58,9 @@ class _PyvisAboutDialogState extends State<PyvisAboutDialog> {
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
                                       colors: [
-                                    Color(0xff133438),
-                                    Color(0xff235548),
-                                    Color(0xff304738)
+                                    Color(0xff211b32),
+                                    Color(0xff332945),
+                                    Color(0xff282137)
                                   ])),
                               padding: const EdgeInsets.all(24),
                               child: Row(children: [
@@ -79,7 +79,7 @@ class _PyvisAboutDialogState extends State<PyvisAboutDialog> {
                                               fontWeight: FontWeight.w600)),
                                       const Text('见微 · Python 图形化学习编辑器',
                                           style: TextStyle(
-                                              color: Color(0xffc4d8ce)))
+                                              color: Color(0xffd7c9e9)))
                                     ]))
                               ])),
                           Padding(

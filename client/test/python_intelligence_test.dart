@@ -5,7 +5,7 @@ import 'package:re_editor/re_editor.dart';
 import 'package:pyvis_editor/python_completion.dart';
 import 'package:pyvis_editor/python_analysis_service.dart';
 import 'package:pyvis_editor/line_theater.dart';
-import 'basic_workflows_test.dart' show openFixture, realIo;
+import 'basic_workflows_test.dart' show openFixture, realIo, waitForRealIo;
 
 void desktopTest(String description, WidgetTesterCallback callback) =>
     testWidgets(description, callback,
@@ -187,7 +187,7 @@ void main() {
     });
     expect(find.byType(CodeEditor), findsOneWidget);
     expect(find.byType(LineTheater), findsNothing);
-    expect(find.text('7\n', findRichText: true), findsOneWidget);
+    await waitForRealIo(tester, find.text('7\n', findRichText: true));
     await tester.tap(find.text('代码流程图'));
     await tester.pumpAndSettle();
     final corrected =
@@ -207,7 +207,7 @@ void main() {
     });
     expect(find.byType(CodeEditor), findsOneWidget);
     expect(find.byType(LineTheater), findsNothing);
-    expect(find.text('valid entry\n', findRichText: true), findsOneWidget);
+    await waitForRealIo(tester, find.text('valid entry\n', findRichText: true));
     await tester.tap(find.text('代码流程图'));
     await tester.pumpAndSettle();
     final events = tester.widget<LineTheater>(find.byType(LineTheater)).events;

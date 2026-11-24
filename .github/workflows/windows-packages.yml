@@ -1,0 +1,66 @@
+name: Windows packages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter and WiX
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:RUNNER_TEMP flutter
+          git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git $sdk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wix = Join-Path $env:RUNNER_TEMP wix
+          dotnet tool install wix --tool-path $wix --version 6.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @((Join-Path $sdk bin), $wix) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build portable ZIP and MSI
+        shell: pwsh
+        run: ./tools/build_windows.ps1
+
+      - name: Verify both packages
+        shell: pwsh
+        run: |
+          $packages = 'client/build/windows/packages'
+          $zip = Get-Item "$packages/*-portable.zip"
+          $portable = Join-Path $env:RUNNER_TEMP pyvis-portable
+          Expand-Archive $zip.FullName $portable
+          if (!(Test-Path "$portable/pyvis_editor.exe")) { throw 'Portable executable is missing.' }
+          & "$portable/python/python.exe" -B -c 'import pyvis_runtime'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msi = Get-Item "$packages/*.msi"
+          $log = Join-Path $env:RUNNER_TEMP pyvis-msi.log
+          $installed = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
+          if ($installed.ExitCode -ne 0) {
+            Get-Content $log -Tail 80
+            throw "MSI install returned $($installed.ExitCode)."
+          }
+          try {
+            $app = Join-Path $env:LOCALAPPDATA 'Programs\Pyvis'
+            if (!(Test-Path "$app/pyvis_editor.exe")) { throw 'Installed executable is missing.' }
+            & "$app/python/python.exe" -B -c 'import pyvis_runtime'
+            if ($LASTEXITCODE -ne 0) { throw 'Installed CPython failed.' }
+          } finally {
+            $removed = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
+            if ($removed.ExitCode -ne 0) { throw "MSI uninstall returned $($removed.ExitCode)." }
+          }
+
+      - name: Upload Windows x64 packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pyvis-Windows-x64
+          path: |
+            client/build/windows/packages/*.msi
+            client/build/windows/packages/*-portable.zip
+          if-no-files-found: error

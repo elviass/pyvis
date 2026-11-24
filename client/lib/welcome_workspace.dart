@@ -116,7 +116,7 @@ class WelcomeLaunch extends StatelessWidget {
                     gradient: RadialGradient(
                         center: Alignment(0, -1),
                         radius: 1.15,
-                        colors: [Color(0xff254c37), PyvisColors.background],
+                        colors: [Color(0xff362b4e), PyvisColors.background],
                         stops: [0, .86])),
                 child: LayoutBuilder(builder: (context, box) {
                   final columns = box.maxWidth >= 320 ? 3 : 2;

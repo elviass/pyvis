@@ -595,6 +595,17 @@ class PythonCompletionActions {
     }
   }
 
+  void handleTab() {
+    if (editor.isComposing) return;
+    if (acceptInline?.call() ?? false) {
+      dismissLookup();
+    } else if (_notifier != null) {
+      confirm(replaceRest: true);
+    } else {
+      editor.applyIndent();
+    }
+  }
+
   Map<Type, Action<Intent>> get actions => {
         CodeShortcutNewLineIntent:
             _CompletionAction<CodeShortcutNewLineIntent>(editor, onInvoke: (_) {
@@ -607,20 +618,7 @@ class PythonCompletionActions {
         }),
         CodeShortcutIndentIntent:
             _CompletionAction<CodeShortcutIndentIntent>(editor, onInvoke: (_) {
-          var accepted = false;
-          void accept() {
-            accepted = acceptInline?.call() ?? false;
-          }
-
-          // Check whether a preview exists without dropping the active lookup.
-          accept();
-          if (accepted) {
-            dismissLookup();
-          } else if (_notifier != null) {
-            confirm(replaceRest: true);
-          } else {
-            editor.applyIndent();
-          }
+          handleTab();
           return null;
         }),
         CodeShortcutCursorMoveIntent:

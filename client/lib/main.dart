@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:material_ui/material_ui.dart';
@@ -366,6 +367,9 @@ class _EditorPageState extends State<EditorPage> {
       decorations.dismissInline();
       hideDiagnosticHover();
     });
+    editorFocus.addListener(() {
+      if (!editorFocus.hasFocus) editorContextMenu.hide(context);
+    });
     editorFocus.addListener(scheduleSemantic);
     editorFocus.addListener(scheduleInline);
     FocusManager.instance.addListener(updatePlatformEditState);
@@ -491,6 +495,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   void activateDocument(EditorDocument document, {bool updateEntry = true}) {
+    editorContextMenu.hide(context);
     renameHint = null;
     recentFiles.remove(document.path);
     recentFiles.insert(0, document.path);
@@ -601,6 +606,7 @@ class _EditorPageState extends State<EditorPage> {
 
   @override
   void dispose() {
+    editorContextMenu.hide(context);
     if (Platform.isMacOS) {
       const MethodChannel('dev.pyvis/editor_commands')
           .setMethodCallHandler(null);
@@ -3032,7 +3038,7 @@ class _EditorPageState extends State<EditorPage> {
                     height: 42,
                     child: Row(children: [
                       SizedBox(width: macKeys ? 92 : 14),
-                      ideIcon('module'),
+                      Image.asset('assets/ide/pyvis.png', width: 22, height: 22),
                       const SizedBox(width: 8),
                       const Text('欢迎页'),
                       const Spacer(),
@@ -4171,8 +4177,60 @@ class _EditorPageState extends State<EditorPage> {
               codeCheckBar(),
             ])),
       ])),
+      if (defaultTargetPlatform == TargetPlatform.android) androidTabKey(),
     ]);
   }
+
+  Widget androidTabKey() => ListenableBuilder(
+      listenable: Listenable.merge([editorFocus, editor]),
+      builder: (context, _) {
+        if (!editorFocus.hasFocus) return const SizedBox.shrink();
+        final canEdit = editorWritable && !editor.isComposing;
+        void changeHistory(VoidCallback change) {
+          editorContextMenu.hide(context);
+          completionPopup.dismiss();
+          decorations.dismissInline();
+          change();
+        }
+
+        return CodeEditorTapRegion(
+            child: TapRegion(
+                groupId: completionPopup,
+                child: ExcludeFocus(
+                    child: Material(
+                        color: panel,
+                        child: SizedBox(
+                            height: 48,
+                            child: Row(children: [
+                              IconButton(
+                                  key: const ValueKey('android-virtual-undo'),
+                                  tooltip: '撤回',
+                                  onPressed: canEdit && editor.canUndo
+                                      ? () => changeHistory(editor.undo)
+                                      : null,
+                                  icon: const Icon(Icons.undo, size: 20)),
+                              IconButton(
+                                  key: const ValueKey('android-virtual-redo'),
+                                  tooltip: '恢复',
+                                  onPressed: canEdit && editor.canRedo
+                                      ? () => changeHistory(editor.redo)
+                                      : null,
+                                  icon: const Icon(Icons.redo, size: 20)),
+                              const Spacer(),
+                              TextButton.icon(
+                                  key: const ValueKey('android-virtual-tab'),
+                                  style: TextButton.styleFrom(
+                                      minimumSize: const Size(76, 48)),
+                                  onPressed: canEdit
+                                      ? () {
+                                          editorContextMenu.hide(context);
+                                          completionKeys.handleTab();
+                                        }
+                                      : null,
+                                  icon: const Icon(Icons.keyboard_tab, size: 16),
+                                  label: const Text('Tab')),
+                            ]))))));
+      });
 
   Future<void> closeFile({String? path}) async {
     final closing = path ?? currentFile;

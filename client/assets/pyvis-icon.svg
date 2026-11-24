@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Pyvis">
+  <defs>
+    <linearGradient id="tile-shade" x1="300" y1="96" x2="720" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#322945"/>
+      <stop offset="1" stop-color="#1B192B"/>
+    </linearGradient>
+    <linearGradient id="light-fold" x1="390" y1="330" x2="623" y2="552" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0DFFF"/>
+      <stop offset="1" stop-color="#C5A6FF"/>
+    </linearGradient>
+    <linearGradient id="dark-fold" x1="710" y1="525" x2="388" y2="715" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9E7FF5"/>
+      <stop offset="1" stop-color="#7554DC"/>
+    </linearGradient>
+    <path id="fold" d="M285.8 523.1Q264 520 279.6 504.4L445.4 338.6Q461 323 483.0 323.0L640.0 323.0Q662 323 677.6 338.6L737.4 398.4Q753 414 737.4 429.6L636.6 530.4Q621 546 605.4 530.4L566.6 491.6Q551 476 566.6 460.4L597.4 429.6Q613 414 591.0 414.0L513.0 414.0Q491 414 475.4 429.6L385.6 519.4Q370 535 348.2 531.9Z"/>
+  </defs>
+  <rect id="tile" x="96" y="96" width="832" height="832" rx="200" fill="url(#tile-shade)"/>
+  <use href="#fold" transform="rotate(180 512 512)" fill="url(#dark-fold)"/>
+  <use href="#fold" fill="url(#light-fold)"/>
+</svg>

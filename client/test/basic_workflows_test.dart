@@ -74,6 +74,13 @@ Future<void> realIo(WidgetTester tester, Future<void> Function() action) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> waitForRealIo(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 10 && finder.evaluate().isEmpty; i++) {
+    await realIo(tester, () async {});
+  }
+  expect(finder, findsOneWidget);
+}
+
 Future<void> advanceDemo(WidgetTester tester) async {
   final next = find.descendant(
       of: find.byTooltip('下一步'),
@@ -97,7 +104,7 @@ Future<void> advanceDemo(WidgetTester tester) async {
 }
 
 Future<Directory> openFixture(WidgetTester tester, Map<String, String> files,
-    {PyvisApp? app}) async {
+    {PyvisApp? app, Size size = const Size(1400, 900)}) async {
   late Directory directory;
   await tester.runAsync(() async {
     directory = await Directory.systemTemp.createTemp('pyvis-workflow-test-');
@@ -111,7 +118,7 @@ Future<Directory> openFixture(WidgetTester tester, Map<String, String> files,
   addTearDown(() async {
     await directory.delete(recursive: true);
   });
-  tester.view.physicalSize = const Size(1400, 900);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -405,7 +412,7 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
-    expect(find.text('你的名字：'), findsOneWidget);
+    await waitForRealIo(tester, find.text('你的名字：'));
     final field = find.byType(TextField);
     await tester.enterText(field, '小林');
     await realIo(tester, () async {

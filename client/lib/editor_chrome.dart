@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'ide_chrome.dart';
 import 'pyvis_theme.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, defaultTargetPlatform;
 import 'package:re_editor/re_editor.dart';
 import 'inspection_style.dart';
 import 'package:re_highlight/re_highlight.dart';
@@ -268,27 +270,30 @@ class EditorContextMenuController implements SelectionToolbarController {
   final _menu = MenuController();
   final _anchor = GlobalKey();
   ValueNotifier<bool>? _visibility;
+  OverlayEntry? _mobileMenu;
 
-  Widget wrap(Widget child) => MenuAnchor(
-      key: _anchor,
-      controller: _menu,
-      onClose: () {
-        _visibility?.value = false;
-        _visibility = null;
-      },
-      menuChildren: [
-        for (final entry in entries()) ...[
-          if (const {'definition', 'renameVariable', 'format', 'inspect'}
-              .contains(entry.id))
-            const Divider(),
-          if (entry.id == 'renameVariable')
-            SubmenuButton(
-                menuChildren: [_button(entry)], child: const Text('重构'))
-          else
-            _button(entry)
-        ]
-      ],
-      child: child);
+  Widget wrap(Widget child) => defaultTargetPlatform == TargetPlatform.android
+      ? child
+      : MenuAnchor(
+          key: _anchor,
+          controller: _menu,
+          onClose: () {
+            _visibility?.value = false;
+            _visibility = null;
+          },
+          menuChildren: [
+            for (final entry in entries()) ...[
+              if (const {'definition', 'renameVariable', 'format', 'inspect'}
+                  .contains(entry.id))
+                const Divider(),
+              if (entry.id == 'renameVariable')
+                SubmenuButton(
+                    menuChildren: [_button(entry)], child: const Text('重构'))
+              else
+                _button(entry)
+            ]
+          ],
+          child: child);
 
   Widget _button(EditorMenuEntry entry) => MenuItemButton(
       onPressed: entry.enabled ? entry.action : null,
@@ -307,6 +312,25 @@ class EditorContextMenuController implements SelectionToolbarController {
       Rect? renderRect,
       required LayerLink layerLink,
       required ValueNotifier<bool> visibility}) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      hide(context);
+      final overlay = Overlay.maybeOf(context, rootOverlay: true);
+      if (overlay == null) return;
+      onShow();
+      _mobileMenu = OverlayEntry(builder: (context) {
+        return ValueListenableBuilder<bool>(
+            valueListenable: visibility,
+            builder: (context, visible, _) => visible
+                ? _AndroidSelectionMenu(
+                    entries: entries(),
+                    anchors: anchors,
+                    overlay: overlay,
+                    dismiss: () => hide(context))
+                : const SizedBox.shrink());
+      });
+      overlay.insert(_mobileMenu!);
+      return;
+    }
     final box = _anchor.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || _menu.isOpen) return;
     onShow();
@@ -316,8 +340,152 @@ class EditorContextMenuController implements SelectionToolbarController {
 
   @override
   void hide(BuildContext context) {
-    // MenuAnchor handles outside clicks and Escape while focus moves into submenus.
+    final mobile = _mobileMenu;
+    _mobileMenu = null;
+    mobile?.remove();
+    mobile?.dispose();
+    // Desktop MenuAnchor manages clicks and focus while a submenu is open.
   }
+}
+
+class _AndroidSelectionMenu extends StatefulWidget {
+  const _AndroidSelectionMenu({
+    required this.entries,
+    required this.anchors,
+    required this.overlay,
+    required this.dismiss,
+  });
+
+  final List<EditorMenuEntry> entries;
+  final TextSelectionToolbarAnchors anchors;
+  final OverlayState overlay;
+  final VoidCallback dismiss;
+
+  @override
+  State<_AndroidSelectionMenu> createState() => _AndroidSelectionMenuState();
+}
+
+class _AndroidSelectionMenuState extends State<_AndroidSelectionMenu> {
+  static const quickIds = {'cut', 'copy', 'paste'};
+  bool expanded = false;
+
+  Widget button(EditorMenuEntry entry, {bool list = false}) {
+    return TextButton(
+        style:
+            list ? TextButton.styleFrom(alignment: Alignment.centerLeft) : null,
+        onPressed: entry.enabled
+            ? () {
+                widget.dismiss();
+                entry.action();
+              }
+            : null,
+        child: Text(entry.title));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final insets = MediaQuery.viewInsetsOf(context);
+    final screen = MediaQueryData.fromView(View.of(context));
+    final box = widget.overlay.context.findRenderObject() as RenderBox;
+    final padding = screen.viewPadding;
+    final safe = Rect.fromPoints(
+        box.globalToLocal(Offset(padding.left, padding.top)),
+        box.globalToLocal(Offset(screen.size.width - padding.right,
+            screen.size.height - math.max(padding.bottom, insets.bottom))));
+    final viewport = safe.intersect(Offset.zero & box.size).deflate(8);
+    if (viewport.height < 48 || viewport.width <= 0) {
+      return const SizedBox.shrink();
+    }
+    final top = box.globalToLocal(widget.anchors.primaryAnchor);
+    final bottom = box.globalToLocal(
+        widget.anchors.secondaryAnchor ?? widget.anchors.primaryAnchor);
+    final quick = widget.entries.where((entry) => quickIds.contains(entry.id));
+    final other = widget.entries.where((entry) => !quickIds.contains(entry.id));
+    return CodeEditorTapRegion(
+        onTapOutside: (_) => widget.dismiss(),
+        child: CustomSingleChildLayout(
+            delegate:
+                _AndroidSelectionMenuLayout(viewport, top, bottom, expanded),
+            child: Material(
+                key: const ValueKey('android-selection-menu'),
+                color: PyvisColors.raised,
+                elevation: 5,
+                borderRadius: BorderRadius.circular(10),
+                clipBehavior: Clip.antiAlias,
+                child: ExcludeFocus(
+                    child: expanded
+                        ? SizedBox(
+                            width: 230,
+                            child: SingleChildScrollView(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                  TextButton.icon(
+                                      onPressed: () =>
+                                          setState(() => expanded = false),
+                                      icon: const Icon(Icons.arrow_back,
+                                          size: 16),
+                                      label: const Text('返回')),
+                                  for (final entry in other)
+                                    button(entry, list: true),
+                                ])))
+                        : SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              for (final entry in quick) button(entry),
+                              if (other.isNotEmpty)
+                                IconButton(
+                                    tooltip: '更多编辑操作',
+                                    onPressed: () =>
+                                        setState(() => expanded = true),
+                                    icon: const Icon(Icons.more_horiz)),
+                            ]))))));
+  }
+}
+
+class _AndroidSelectionMenuLayout extends SingleChildLayoutDelegate {
+  const _AndroidSelectionMenuLayout(
+      this.viewport, this.start, this.end, this.expanded);
+
+  final Rect viewport;
+  final Offset start, end;
+  final bool expanded;
+  static const gap = 10.0;
+
+  double get above => start.dy.clamp(viewport.top, viewport.bottom) - gap;
+  double get below => end.dy.clamp(viewport.top, viewport.bottom) + gap;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    final space = math.max(above - viewport.top, viewport.bottom - below);
+    return BoxConstraints(
+        maxWidth: viewport.width,
+        maxHeight: math
+            .max(space, expanded ? 96.0 : 48.0)
+            .clamp(0.0, math.min(viewport.height, expanded ? 280.0 : 48.0)));
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final useAbove = above - viewport.top >= childSize.height ||
+        (viewport.bottom - below < childSize.height &&
+            above - viewport.top >= viewport.bottom - below);
+    final anchor = useAbove ? start : end;
+    final y = useAbove ? above - childSize.height : below;
+    return Offset(
+        (anchor.dx - childSize.width / 2)
+            .clamp(viewport.left, viewport.right - childSize.width),
+        y.clamp(viewport.top, viewport.bottom - childSize.height));
+  }
+
+  @override
+  bool shouldRelayout(_AndroidSelectionMenuLayout oldDelegate) =>
+      viewport != oldDelegate.viewport ||
+      start != oldDelegate.start ||
+      end != oldDelegate.end ||
+      expanded != oldDelegate.expanded;
 }
 
 class EditorProblemsPane extends StatefulWidget {

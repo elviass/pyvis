@@ -620,7 +620,16 @@ class _MobileSelectionOverlayController implements _SelectionOverlayController {
     );
     final CodeLineSelection selection = controller.selection;
     final TextSelectionToolbarAnchors anchors;
-    if (selection.isCollapsed) {
+    if (kIsAndroid) {
+      final start = ensureRender.calculateTextPositionScreenOffset(selection.start, false);
+      final end = ensureRender.calculateTextPositionScreenOffset(selection.end, true);
+      final top = start?.dy ?? (selection.isCollapsed ? globalPosition.dy : editingRegion.top);
+      final bottom = end?.dy ?? (selection.isCollapsed ? globalPosition.dy + lineHeight : editingRegion.bottom);
+      anchors = TextSelectionToolbarAnchors(
+        primaryAnchor: Offset(globalPosition.dx, top.clamp(editingRegion.top, editingRegion.bottom)),
+        secondaryAnchor: Offset(globalPosition.dx, bottom.clamp(editingRegion.top, editingRegion.bottom)),
+      );
+    } else if (selection.isCollapsed) {
       anchors = TextSelectionToolbarAnchors(
         primaryAnchor: ensureRender.calculateTextPositionScreenOffset(selection.start, false) ?? globalPosition,
       );
@@ -668,6 +677,7 @@ class _MobileSelectionOverlayController implements _SelectionOverlayController {
   void dispose() {
     _startHandleDragging = false;
     _endHandleDragging = false;
+    hideToolbar();
     hideHandle();
     controller.removeListener(_updateTextSelectionHandle);
     _effectiveStartHandleVisibility.dispose();
