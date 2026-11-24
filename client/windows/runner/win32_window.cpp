@@ -20,6 +20,10 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
+// Keep Windows sizing and taskbar commands without requesting a native caption.
+constexpr DWORD kWindowStyle =
+    WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+
 // Match the logical dimensions of the Flutter title bar and its three buttons.
 constexpr int kTitleBarHeight = 36;
 constexpr int kCaptionButtonWidth = 46;
@@ -194,7 +198,7 @@ bool Win32Window::Create(const std::wstring& title,
   double scale_factor = dpi / 96.0;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      window_class, title.c_str(), kWindowStyle,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -274,6 +278,14 @@ Win32Window::MessageHandler(HWND hwnd,
       if (wparam == HTMAXBUTTON) {
         SetCapture(hwnd);
         maximize_pressed_ = true;
+        return 0;
+      }
+      break;
+
+    case WM_NCLBUTTONDBLCLK:
+      if (wparam == HTCAPTION) {
+        PostMessage(hwnd, WM_SYSCOMMAND,
+                    IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE, 0);
         return 0;
       }
       break;
