@@ -127,11 +127,14 @@ FetchContent_Declare(pyvis_cpython
   URL_HASH "SHA256=${PYVIS_PYTHON_SHA}")
 FetchContent_MakeAvailable(pyvis_cpython)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/python314._pth" "python314.zip\n.\n../data/runtime\nimport site\n")
-install(DIRECTORY "${pyvis_cpython_SOURCE_DIR}/" DESTINATION python COMPONENT Runtime
+set(INSTALL_BUNDLE_PYTHON_DIR "${CMAKE_INSTALL_PREFIX}/python")
+install(DIRECTORY "${pyvis_cpython_SOURCE_DIR}/" DESTINATION "${INSTALL_BUNDLE_PYTHON_DIR}" COMPONENT Runtime
   PATTERN "*._pth" EXCLUDE)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/python314._pth" DESTINATION python COMPONENT Runtime)
-install(DIRECTORY "../../runtime/pyvis_runtime" DESTINATION data/runtime COMPONENT Runtime
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/python314._pth" DESTINATION "${INSTALL_BUNDLE_PYTHON_DIR}" COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/pyvis_runtime"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/runtime" COMPONENT Runtime
   PATTERN "__pycache__" EXCLUDE PATTERN ".DS_Store" EXCLUDE
   PATTERN "*-macosx_*.whl" EXCLUDE)
-install(DIRECTORY "../../examples/" DESTINATION data/examples COMPONENT Runtime
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../examples/"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/examples" COMPONENT Runtime
   FILES_MATCHING PATTERN "*.py")

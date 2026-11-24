@@ -33,7 +33,20 @@ Push-Location $client
 try {
     Invoke-Checked flutter @('pub', 'get')
     Invoke-Checked flutter @('analyze')
-    Invoke-Checked flutter @('build', 'windows', '--release', '--no-pub')
+    try {
+        Invoke-Checked flutter @('build', 'windows', '--release', '--no-pub')
+    } catch {
+        $build = Join-Path $client 'build\windows\x64'
+        $cache = Join-Path $build CMakeCache.txt
+        if (Test-Path $cache) {
+            $cmake = Select-String -Path $cache -Pattern '^CMAKE_COMMAND:INTERNAL=(.+)$' |
+                Select-Object -First 1
+            if ($cmake -and (Test-Path (Join-Path $build 'runner\Release\pyvis_editor.exe'))) {
+                & $cmake.Matches[0].Groups[1].Value --install $build --config Release
+            }
+        }
+        throw
+    }
 
     $release = Join-Path $client 'build\windows\x64\runner\Release'
     $python = Join-Path $release 'python\python.exe'
