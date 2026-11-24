@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Pyvis" Manufacturer="Pyvis" Version="$(var.PackageVersion)"
+  <Package Name="Pyvis" Manufacturer="Pyvis" Version="$(var.PackageVersion)" Language="2052" Codepage="936"
            UpgradeCode="2E404B15-0C22-44F4-8E62-609D079A784E" Scope="perUserOrMachine">
-    <MajorUpgrade AllowSameVersionUpgrades="yes"
-                  DowngradeErrorMessage="A newer version of Pyvis is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" IgnoreLanguage="yes"
+                  DowngradeErrorMessage="!(loc.PyvisNewerVersion)" />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="Pyvis.exe" SourceFile="!(bindpath.payload)\pyvis_editor.exe" />
     <Property Id="ARPPRODUCTICON" Value="Pyvis.exe" />

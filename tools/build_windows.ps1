@@ -74,6 +74,7 @@ try {
         $installer = Join-Path $client 'windows\packaging'
         $msi = Join-Path $output "Pyvis-$version-win-x64.msi"
         Invoke-Checked $Wix @('build', '-arch', 'x64', '-ext', 'WixToolset.UI.wixext/6.0.2',
+            '-culture', 'zh-cn', '-loc', (Join-Path $installer 'Pyvis.zh-cn.wxl'),
             '-d', "PackageVersion=$version", '-bindpath', "payload=$release", '-out', $msi,
             (Join-Path $installer 'Pyvis.wxs'), (Join-Path $installer 'PyvisSetup.wxs'))
         Write-Host "MSI: $msi"

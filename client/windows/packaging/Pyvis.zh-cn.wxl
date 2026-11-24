@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-cn" Codepage="936">
+  <String Id="PyvisSetupTitle" Value="[ProductName] 安装向导" />
+  <String Id="PyvisOptionsHeading" Value="安装选项" />
+  <String Id="PyvisInstallAllUsers" Value="为所有用户安装（需要管理员权限）" />
+  <String Id="PyvisInstallCurrentUser" Value="仅为我安装" />
+  <String Id="PyvisCreateDesktop" Value="创建桌面快捷方式" />
+  <String Id="PyvisNewerVersion" Value="已安装更新版本的 Pyvis。" />
+</WixLocalization>

@@ -19,20 +19,20 @@
       <DialogRef Id="FilesInUse" />
       <DialogRef Id="MsiRMFilesInUse" />
 
-      <Dialog Id="PyvisOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+      <Dialog Id="PyvisOptionsDlg" Width="370" Height="270" Title="!(loc.PyvisSetupTitle)">
         <Control Id="Heading" Type="Text" X="20" Y="16" Width="330" Height="20"
-                 Text="{\WixUI_Font_Title}Installation options" />
+                 Text="{\WixUI_Font_Title}!(loc.PyvisOptionsHeading)" />
         <Control Id="Scope" Type="RadioButtonGroup" X="20" Y="53" Width="330" Height="63"
                  Property="PyvisScope">
           <RadioButtonGroup Property="PyvisScope">
             <RadioButton Value="Machine" X="0" Y="0" Width="325" Height="18"
-                         Text="Install for &amp;all users (requires administrator permission)" />
+                         Text="!(loc.PyvisInstallAllUsers)" />
             <RadioButton Value="User" X="0" Y="31" Width="325" Height="18"
-                         Text="Install &amp;only for me" />
+                         Text="!(loc.PyvisInstallCurrentUser)" />
           </RadioButtonGroup>
         </Control>
         <Control Id="DesktopShortcut" Type="CheckBox" X="20" Y="132" Width="330" Height="18"
-                 Property="PYVISDESKTOP" CheckBoxValue="1" Text="Create a &amp;desktop shortcut" />
+                 Property="PYVISDESKTOP" CheckBoxValue="1" Text="!(loc.PyvisCreateDesktop)" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
                  Default="yes" Text="!(loc.WixUINext)">
