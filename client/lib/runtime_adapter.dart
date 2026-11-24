@@ -170,28 +170,40 @@ class RuntimeAdapter {
       throw UnsupportedError('移动端嵌入式运行桥尚未实现');
     }
     final python = pythonExecutable;
-    final process = await Process.start(
-        python,
-        [
-          '-X',
-          'utf8',
-          '-u',
-          '-m',
-          'pyvis_runtime',
-          entry,
-          '--project',
-          project,
-          '--worker',
-          '--mode',
-          demo ? 'demo' : 'direct',
-        ],
-        environment: environment);
+    final process = await Process.start(python, [
+      '-X',
+      'utf8',
+      '-u',
+      '-m',
+      'pyvis_runtime',
+      entry,
+      '--project',
+      project,
+      '--worker',
+      '--mode',
+      demo ? 'demo' : 'direct',
+    ], environment: {
+      ...environment,
+      'PYVIS_COMPACT_HEAP': '1'
+    });
     if (generation != _generation) {
       process.kill();
       return;
     }
     _process = process;
     var finished = false;
+    var previousHeap = <String, dynamic>{};
+    void expandHeap(Map<String, dynamic> snapshot) {
+      final heap = snapshot['heap'] as Map<String, dynamic>;
+      for (final key in heap.keys) {
+        if (heap[key] == null) {
+          heap[key] =
+              previousHeap[key] ?? (throw const FormatException('执行记录缺少前置对象'));
+        }
+      }
+      previousHeap = heap;
+    }
+
     final stdoutDone = Completer<void>();
     process.stdout
         .transform(utf8.decoder)
@@ -201,6 +213,11 @@ class RuntimeAdapter {
               if (_process != process) return;
               try {
                 final event = jsonDecode(line) as Map<String, dynamic>;
+                if (event['seq'] != null) {
+                  final before = event['before'];
+                  if (before is Map<String, dynamic>) expandHeap(before);
+                  expandHeap(event);
+                }
                 if (event['kind'] == 'finished') finished = true;
                 onEvent(event);
               } catch (e) {

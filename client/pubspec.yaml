@@ -30,7 +30,6 @@ flutter:
     - assets/graph/vendor/
     - ../runtime/pyvis_runtime/
     - ../runtime/pyvis_runtime/vendor/
-    - ../runtime/pyvis_runtime/vendor/tools/
     - ../runtime/pyvis_runtime/vendor/spelling/
     - ../examples/
     - ../examples/多文件/

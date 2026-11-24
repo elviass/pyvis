@@ -1,11 +1,37 @@
 import argparse
 import json
+import os
 from pathlib import Path
 import queue
 import sys
 import threading
 
 from .engine import Recorder
+
+
+class HeapDelta:
+    """Reuse unchanged entries from the preceding snapshot on the worker wire."""
+
+    def __init__(self):
+        self.previous = {}
+
+    def snapshot(self, snapshot):
+        heap = snapshot['heap']
+        previous = self.previous
+        current = {}
+        compact = {}
+        for key, value in heap.items():
+            # Serialized equality preserves dictionary order and the sign of zero.
+            fingerprint = json.dumps(value, separators=(',', ':'), allow_nan=False)
+            current[key] = fingerprint
+            compact[key] = None if previous.get(key) == fingerprint else value
+        self.previous = current
+        return {**snapshot, 'heap': compact}
+
+    def event(self, event):
+        if 'before' in event:
+            event = {**event, 'before': self.snapshot(event['before'])}
+        return self.snapshot(event)
 
 
 def main():
@@ -20,9 +46,14 @@ def main():
     condition = threading.Condition()
     state = {'paused': args.mode == 'demo', 'steps': 0, 'stopped': False}
     inputs = queue.Queue()
+    compact = os.environ.pop('PYVIS_COMPACT_HEAP', '') == '1'
+    delta = HeapDelta() if args.worker and compact else None
 
     def send(message):
-        wire.write(json.dumps(message, ensure_ascii=False, allow_nan=False) + '\n')
+        if delta is not None and 'seq' in message:
+            message = delta.event(message)
+        data = json.dumps(message, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+        wire.write(data.encode('utf-8', 'backslashreplace').decode('utf-8') + '\n')
         wire.flush()
 
     def commands():
@@ -74,7 +105,7 @@ def main():
                         input_provider=read_input if args.worker else lambda _: '')
     archive = recorder.run(args.entry, args.project)
     if args.output:
-        Path(args.output).write_text(json.dumps(archive, ensure_ascii=False, allow_nan=False), encoding='utf-8')
+        Path(args.output).write_text(json.dumps(archive, allow_nan=False), encoding='utf-8')
     if args.worker:
         send({'kind': 'finished', 'status': archive['status'], 'error': archive['error'],
               'sources': archive['sources'], 'output': archive['output']})

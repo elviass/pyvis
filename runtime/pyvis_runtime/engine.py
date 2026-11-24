@@ -4,6 +4,7 @@ import ast
 import builtins
 import contextlib
 import io
+from itertools import islice
 import os
 from pathlib import Path
 import sys
@@ -11,11 +12,27 @@ import threading
 import traceback
 import types
 import uuid
+import weakref
 from .source_encoding import decode_source
 
 
 class RecordingLimit(Exception):
     pass
+
+
+def exception_message(error):
+    # A trace hook runs before Python finds the learner's exception handler.
+    # Reading BaseException.args avoids invoking user formatters or properties.
+    args = BaseException.args.__get__(error)
+    if type(error) is SyntaxError or type(error) in (IndentationError, TabError):
+        return SyntaxError.msg.__get__(error) or ''
+    if not args or any(type(arg) not in (str, int, float, bool, type(None)) for arg in args):
+        return ''
+    if any(type(arg) is int and arg.bit_length() > 4096 for arg in args):
+        return ''
+    if len(args) == 1 and type(error) is not KeyError:
+        return str(args[0])
+    return repr(args[0] if len(args) == 1 else args)
 
 
 class Instrument(ast.NodeTransformer):
@@ -50,10 +67,29 @@ class Instrument(ast.NodeTransformer):
     def visit_Lambda(self, node):
         return node
 
+    def visit_match_case(self, node):
+        # Pattern lookups must stay as attribute expressions in the AST.
+        if node.guard is not None:
+            node.guard = self.visit(node.guard)
+        node.body = [self.visit(stmt) for stmt in node.body]
+        return node
+
+    def generic_visit(self, node):
+        # Annotations may be stringized or evaluated after the trace has ended.
+        original = {name: node.__dict__.pop(name) for name in
+                    ('annotation', 'returns', 'type_params') if name in node.__dict__}
+        try:
+            return super().generic_visit(node)
+        finally:
+            node.__dict__.update(original)
+
+    def visit_TypeAlias(self, node):
+        return node
+
 
 class Snapshot:
     def __init__(self):
-        self.objects = {}  # Kept alive during one run to prevent id reuse.
+        self.objects = {}
         self.counter = 0
 
     def capture(self, frames, extra=()):
@@ -71,27 +107,41 @@ class Snapshot:
                     obj = '<大整数>'
                 return {'type': kind, 'value': obj}
             address = id(obj)
-            if address not in self.objects:
+            registered = self.objects.get(address)
+            if registered is not None:
+                oid, stored, weak = registered
+                if (stored() if weak else stored) is not obj:
+                    registered = None
+            if registered is None and remaining[0] <= 0:
+                return {'type': kind, 'value': '<对象已截断>'}
+            if registered is None:
                 self.counter += 1
-                self.objects[address] = (f'o{self.counter}', obj)
-            oid = self.objects[address][0]
+                oid = f'o{self.counter}'
+                try:
+                    stored = weakref.ref(obj)
+                    weak = True
+                except TypeError:
+                    # Some builtin containers need a strong reference to avoid id reuse.
+                    stored, weak = obj, False
+                self.objects[address] = (oid, stored, weak)
             ref = {'type': kind, 'ref': oid}
             if oid in heap:
                 return ref
+            if remaining[0] <= 0:
+                return {'type': kind, 'value': '<对象已截断>'}
             entry = {'id': oid, 'type': kind}
             heap[oid] = entry
             remaining[0] -= 1
-            if depth >= 6 or remaining[0] <= 0:
+            if depth >= 6:
                 entry['truncated'] = True
                 return ref
             if type(obj) in (list, tuple, set, frozenset):
-                items = list(obj) if type(obj) in (set, frozenset) else obj
-                entry['items'] = [value(x, depth + 1) for x in items[:100]]
+                entry['items'] = [value(x, depth + 1) for x in islice(obj, 100)]
                 entry['length'] = len(obj)
                 entry['truncated'] = len(obj) > 100
             elif type(obj) is dict:
                 entry['entries'] = [[value(k, depth+1), value(v, depth+1)]
-                                    for k, v in list(obj.items())[:100]]
+                                    for k, v in islice(obj.items(), 100)]
                 entry['length'] = len(obj)
             elif type(obj) is types.FunctionType:
                 entry['name'] = obj.__name__
@@ -111,7 +161,7 @@ class Snapshot:
                                 pass
                         break
                 if type(attrs) is dict:
-                    entry['attributes'] = {str(k): value(v, depth+1) for k, v in list(attrs.items())[:100]
+                    entry['attributes'] = {k: value(v, depth+1) for k, v in islice(attrs.items(), 100)
                                            if type(k) is str}
             return ref
 
@@ -150,6 +200,7 @@ class Recorder:
         self.event_count = 0
         self.retain_events = retain_events
         self.source_lines = {}
+        self.encoded_lines = {}
         self.on_event, self.gate = on_event, gate
         self.input_provider = input_provider or (lambda prompt: '')
         self.max_events = max_events
@@ -158,6 +209,7 @@ class Recorder:
         self.snapshot = Snapshot()
         self.output = {'stdout': '', 'stderr': ''}
         self.sources = {}
+        self.source_errors = {}
         self.busy = False
         self.hook_name = '_pyvis_observe_' + uuid.uuid4().hex
         self.error = None
@@ -166,7 +218,7 @@ class Recorder:
         self.expression_info = {}
         self.expression_operators = {}
 
-    def emit(self, kind, frame=None, **payload):
+    def emit(self, kind, frame=None, *, captured=None, **payload):
         if self.busy:
             return
         if self.event_count >= self.max_events:
@@ -178,7 +230,7 @@ class Recorder:
             event = {'seq': self.event_count, 'kind': kind,
                      'file': frame.f_code.co_filename if frame else None,
                      'line': frame.f_lineno if frame else None,
-                     **payload, **self.snapshot.capture(self.frames, values)}
+                     **payload, **(captured if captured is not None else self.snapshot.capture(self.frames, values))}
             self.event_count += 1
             if self.retain_events:
                 self.events.append(event)
@@ -191,10 +243,10 @@ class Recorder:
     def observe(self, result, line, col, end_line, end_col, expression):
         # Evaluation happens in the caller before this callback.
         frame = sys._getframe(1)
-        source_lines = self.source_lines[frame.f_code.co_filename]
+        source_lines = self.encoded_lines[frame.f_code.co_filename]
         excerpt = ''
         if line == end_line and line <= len(source_lines):
-            excerpt = source_lines[line-1].encode('utf-8')[col:end_col].decode('utf-8')
+            excerpt = source_lines[line-1][col:end_col].decode('utf-8')
         operands = []
         for child in self.expression_info.get((frame.f_code.co_filename, line, col, end_line, end_col), []):
             value = child.get('literal')
@@ -252,15 +304,16 @@ class Recorder:
                 if not loop_header:
                     return self.trace
             self.complete_statement(frame, next_line=line, next_column=info.get('column'))
+            before = self.snapshot.capture(self.frames)
             self.pending[id(frame)] = {
                 'line': line, 'column': info.get('column'), 'type': info.get('type', 'Statement'),
                 'code': info.get('code', self.source_lines[frame.f_code.co_filename][line-1].strip()),
-                'before': self.snapshot.capture(self.frames), 'operations': [], 'operand_values': {}, 'start_seq': self.event_count,
+                'before': before, 'operations': [], 'operand_values': {}, 'start_seq': self.event_count,
                 'assigned_names': info.get('assigned_names', []),
                 'body_range': info.get('body_range'),
                 'condition_span': info.get('condition_span'),
                 'value_type': info.get('value_type')}
-            self.emit('line', frame, line=line, column=info.get('column'))
+            self.emit('line', frame, captured=before, line=line, column=info.get('column'))
             if self.gate:
                 self.gate()
         elif event == 'return':
@@ -269,19 +322,22 @@ class Recorder:
             self.frames = [(i, f) for i, f in self.frames if f is not frame]
         elif event == 'exception':
             self.complete_statement(frame, outcome='exception')
-            self.emit('exception', frame, exception_type=arg[0].__name__, message=str(arg[1]))
+            self.emit('exception', frame, exception_type=type.__getattribute__(arg[0], '__name__'),
+                      message=exception_message(arg[1]))
         return self.trace
 
     def run(self, entry, project=None):
         entry = Path(entry).resolve()
         project = Path(project or entry.parent).resolve()
-        for file in project.rglob('*.py'):
-            if any(p.startswith('.') or p in ('venv', 'node_modules', '__pycache__') for p in file.relative_to(project).parts):
-                continue
-            text, _ = decode_source(file.read_bytes())
-            self.sources[str(file)] = text.replace('\r\n', '\n').replace('\r', '\n')
-        self.source_lines = {name: source.splitlines() for name, source in self.sources.items()}
-        source = self.sources[str(entry)]
+        for folder, directories, filenames in os.walk(project):
+            directories[:] = [name for name in directories
+                              if not name.startswith('.') and name not in ('venv', 'node_modules', '__pycache__')]
+            for name in filenames:
+                if name.startswith('.') or not name.endswith('.py'):
+                    continue
+                self.load_source(Path(folder) / name)
+        if str(entry) not in self.sources and str(entry) not in self.source_errors:
+            self.load_source(entry)
         old_path, old_argv, old_cwd = sys.path[:], sys.argv[:], os.getcwd()
         old_trace = sys.gettrace()
         old_input = builtins.input
@@ -302,9 +358,9 @@ class Recorder:
                 parts = fullname.split('.')
                 file = project.joinpath(*parts).with_suffix('.py')
                 package = project.joinpath(*parts, '__init__.py')
-                if str(package) in recorder.sources:
+                if str(package) in recorder.sources or str(package) in recorder.source_errors:
                     return importlib.util.spec_from_file_location(fullname, package, loader=Loader(), submodule_search_locations=[str(package.parent)])
-                if str(file) in recorder.sources:
+                if str(file) in recorder.sources or str(file) in recorder.source_errors:
                     return importlib.util.spec_from_file_location(fullname, file, loader=Loader())
                 return None
 
@@ -327,8 +383,12 @@ class Recorder:
                 sys.settrace(self.trace)
                 exec(code, namespace)
         except BaseException as exc:
-            self.error = {'type': type(exc).__name__, 'message': str(exc),
-                          'traceback': traceback.format_exc()}
+            name = type.__getattribute__(type(exc), '__name__')
+            message = exception_message(exc)
+            trace = traceback.format_tb(exc.__traceback__)
+            self.error = {'type': name, 'message': message,
+                          'traceback': 'Traceback (most recent call last):\n' + ''.join(trace) +
+                          (f'{name}: {message}\n' if message else f'{name}\n')}
             if isinstance(exc, SyntaxError):
                 self.error.update(file=exc.filename, line=exc.lineno, column=exc.offset)
             else:
@@ -351,8 +411,35 @@ class Recorder:
                 'events': self.events, 'output': self.output, 'error': self.error,
                 'status': 'error' if self.error else 'completed'}
 
+    def load_source(self, path):
+        filename = str(path)
+        try:
+            text, _ = decode_source(path.read_bytes())
+            source = text.replace('\r\n', '\n').replace('\r', '\n')
+            self.sources[filename] = source
+            self.source_lines[filename] = source.split('\n')
+        except SyntaxError as error:
+            self.source_errors[filename] = SyntaxError(error.msg, (filename, error.lineno or 1, error.offset or 1, None))
+        except (OSError, UnicodeError, LookupError) as error:
+            self.source_errors[filename] = SyntaxError(str(error), (filename, 1, 1, None))
+
     def compile(self, filename):
-        tree = ast.parse(self.sources[filename], filename=filename)
+        if filename in self.source_errors:
+            raise self.source_errors[filename]
+        source = self.sources[filename]
+        tree = ast.parse(source, filename=filename)
+        source_lines = source.split('\n')
+        encoded_lines = [line.encode('utf-8') for line in source_lines]
+        self.encoded_lines[filename] = encoded_lines
+
+        def segment(node):
+            start, end = node.lineno - 1, node.end_lineno - 1
+            if start == end:
+                return encoded_lines[start][node.col_offset:node.end_col_offset].decode('utf-8')
+            lines = [encoded_lines[start][node.col_offset:], *encoded_lines[start+1:end],
+                     encoded_lines[end][:node.end_col_offset]]
+            return b'\n'.join(lines).decode('utf-8')
+
         control_tests = set()
 
         def keep_jump_context(test):
@@ -388,7 +475,7 @@ class Recorder:
             if children:
                 info = []
                 for child in children:
-                    item = {'span': [child.lineno, child.col_offset, child.end_lineno, child.end_col_offset], 'text': ast.get_source_segment(self.sources[filename], child)}
+                    item = {'span': [child.lineno, child.col_offset, child.end_lineno, child.end_col_offset], 'text': segment(child)}
                     if isinstance(child, ast.Constant) and type(child.value) in (int, float, str, bool, type(None)):
                         literal = child.value
                         if type(literal) is float and (literal != literal or abs(literal) == float('inf')):
@@ -401,7 +488,7 @@ class Recorder:
                 names = [part.id for target in targets for part in ast.walk(target)
                          if isinstance(part, ast.Name) and isinstance(part.ctx, ast.Store)]
                 info = {'type': type(node).__name__, 'assigned_names': names,
-                        'line': node.lineno, 'column': node.col_offset, 'code': ast.get_source_segment(self.sources[filename], node)}
+                        'line': node.lineno, 'column': node.col_offset, 'code': segment(node)}
                 if isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor)):
                     info['body_range'] = [node.body[0].lineno, node.body[-1].end_lineno]
                 if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
@@ -414,9 +501,9 @@ class Recorder:
                 body = getattr(node, 'body', None)
                 end = max(node.lineno, body[0].lineno - 1) if isinstance(body, list) and body else node.end_lineno
                 if isinstance(body, list) and body:
-                    info['code'] = self.sources[filename].splitlines()[node.lineno-1].strip()
+                    info['code'] = source_lines[node.lineno-1].strip()
                 for line in range(node.lineno, end + 1):
                     self.statements.setdefault((filename, line), info)
         tree = Instrument(self.hook_name, control_tests).visit(tree)
         ast.fix_missing_locations(tree)
-        return compile(tree, filename, 'exec')
+        return compile(tree, filename, 'exec', dont_inherit=True)

@@ -185,6 +185,11 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    expect(find.byType(CodeEditor), findsOneWidget);
+    expect(find.byType(LineTheater), findsNothing);
+    expect(find.text('7\n', findRichText: true), findsOneWidget);
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     final corrected =
         tester.widget<LineTheater>(find.byType(LineTheater)).events;
     expect(
@@ -200,6 +205,11 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    expect(find.byType(CodeEditor), findsOneWidget);
+    expect(find.byType(LineTheater), findsNothing);
+    expect(find.text('valid entry\n', findRichText: true), findsOneWidget);
+    await tester.tap(find.text('代码流程图'));
+    await tester.pumpAndSettle();
     final events = tester.widget<LineTheater>(find.byType(LineTheater)).events;
     expect(
         events.where((e) => e['kind'] == 'output').map((e) => e['text']).join(),

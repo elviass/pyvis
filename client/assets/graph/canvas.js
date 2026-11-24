@@ -5,7 +5,7 @@
   const model = window.PyvisModel, element = document.getElementById('graph');
   const graph = new LGraph();
   const canvas = new LGraphCanvas(element, graph, { autoresize: false, skip_render: true });
-  let payload, scene, updating = false, selected, signature;
+  let payload, scene, updating = false, selected, signature, geometryKey;
   let awaitingFrame = false, viewportSize, resizeFrame, failureMessage;
   const nodeMap = new Map(), memories = new Map();
   const linkSpecs = new WeakMap(), highlightedWires = new Set();
@@ -576,9 +576,36 @@
     document.getElementById('zoom').textContent = `${Math.round(canvas.ds.scale * 100)}%`;
   }
   for (const button of document.querySelectorAll('[data-action]')) button.onclick = () => command(button.dataset.action);
+  function focusScene(next, memory) {
+    const target = scene.detail && !next.focusId
+      ? scene.nodes.slice().sort((a, b) => a.x - b.x || a.y - b.y)[0]
+      : model.focusNode(scene, next.focusId, next.activeLine);
+    if (target) {
+      select(nodeMap.get(target.id), false, false);
+      if (next.reveal && (!next.manualCamera || (!memory && (next.activeLine || next.detailId)))) readable();
+    }
+    updating = false;
+    scheduleRoutes();
+    awaitingFrame = true;
+    canvas.setDirty(true, true);
+    document.getElementById('zoom').textContent = `${Math.round(canvas.ds.scale * 100)}%`;
+  }
+
   function receive(next) {
     awaitingFrame = false;
     try {
+      const portraitLayout = next.manualCamera && element.clientWidth < element.clientHeight;
+      const { revision, activeLine, focusId, reveal, resetCamera, ...geometry } = next;
+      const nextGeometry = JSON.stringify([portraitLayout, geometry]);
+      if (payload && scene && !resetCamera && nextGeometry === geometryKey) {
+        payload = next;
+        updating = true;
+        canvas.deselectAllNodes();
+        clearSelection();
+        hint.textContent = defaultHint;
+        focusScene(next, true);
+        return;
+      }
       if (payload && !next.resetCamera) remember();
       const same = payload?.key === next.key, memory = next.resetCamera ? null : memories.get(next.key);
       if (next.manualCamera && !document.body.classList.contains('mobile-graph')) {
@@ -599,7 +626,7 @@
       hint.textContent = defaultHint;
       document.getElementById('inspector').hidden = true;
       scene = model.buildScene({ ...payload,
-        portraitLayout: next.manualCamera && element.clientWidth < element.clientHeight,
+        portraitLayout,
         positions: { ...payload.positions, ...memory?.positions } });
       signature = JSON.stringify([scene.nodes.map(n => [n.id, n.base, n.width, n.height]), scene.links]);
       const collapsed = new Set(memory?.collapsed);
@@ -648,21 +675,12 @@
         if (canvas.ds.scale < .6) readable();
       } else readable();
       resetRouting();
-      const focusTarget = scene.detail && !next.focusId
-        ? scene.nodes.slice().sort((a, b) => a.x - b.x || a.y - b.y)[0]
-        : model.focusNode(scene, next.focusId, next.activeLine);
-      if (focusTarget) {
-        select(nodeMap.get(focusTarget.id), false, false);
-        if (next.reveal && (!next.manualCamera || (!memory && (next.activeLine || next.detailId)))) readable();
-      }
-      updating = false;
-      scheduleRoutes();
-      awaitingFrame = true;
-      canvas.setDirty(true, true);
-      document.getElementById('zoom').textContent = `${Math.round(canvas.ds.scale * 100)}%`;
+      focusScene(next, memory);
+      geometryKey = nextGeometry;
     } catch (error) {
       updating = false;
       awaitingFrame = false;
+      geometryKey = null;
       fail('生成节点画布', error);
     }
   }

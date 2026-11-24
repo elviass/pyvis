@@ -41,10 +41,12 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final key = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(key: key, child: const PyvisApp()));
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 10 && find.text('共享列表.py').evaluate().isEmpty; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+    }
     expect(find.text('共享列表.py'), findsWidgets);
     await tester.runAsync(() async {
       await tester.tap(find.text('逐行运算.py').first);
@@ -54,10 +56,16 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.tap(find.byTooltip('直接运行').first);
-      await Future<void>.delayed(const Duration(seconds: 1));
     });
-    await tester.pumpAndSettle();
-
+    for (var i = 0;
+        i < 25 && find.text('50\n', findRichText: true).evaluate().isEmpty;
+        i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      });
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('50\n', findRichText: true), findsOneWidget);
     expect(find.byKey(const ValueKey('flow-workspace-graph')), findsNothing);
     await tester.tap(find.text('代码流程图').first);
     await tester.pumpAndSettle();

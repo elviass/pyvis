@@ -1,5 +1,8 @@
 """Managed offline editor tools, separate from execution of learner programs."""
+import ast
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -12,6 +15,8 @@ import tempfile
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 import zipfile
+from .inspection_presentation import ruff_hint, type_hint
+from .local_imports import import_candidates
 from .source_encoding import convert_source, decode_source
 
 VENDOR = Path(__file__).parent / 'vendor' / 'tools'
@@ -87,11 +92,6 @@ def lint(source, filename):
     records = json.loads(run('ruff', ['check', '--isolated', '--no-cache', '--output-format', 'json',
         '--select', 'E4,E7,E9,F,W291,W293', '--ignore', 'F821', '--stdin-filename', filename, '-'], source))
     result = []
-    hints = {'F401': '删除未使用的导入，或在后续代码中使用它。',
-             'F841': '检查变量是否需要使用；也可以去掉无用的赋值。',
-             'F811': '检查此名称是否重复定义，避免覆盖前面的定义。',
-             'F823': '函数内给名称赋值后，它通常被视为局部变量；检查赋值与读取的顺序。',
-             'E722': '说明要捕获的异常类型，避免掩盖意外错误。'}
     for item in records:
         code = item['code'] or 'SyntaxError'
         if code == 'SyntaxError': continue
@@ -100,27 +100,33 @@ def lint(source, filename):
         result.append(dict(file=filename, line=loc['row'], column=loc['column'],
             end_line=end['row'], end_column=end['column'], code=code, engine='Ruff',
             severity='weak_warning' if code in ('F401','F841') or code.startswith(('E2','E3','W')) else 'warning',
-            message=item['message'], hint=hints.get(code, '检查标记处的写法、空白和名称使用。'),
+            message=item['message'], hint=ruff_hint(code),
             blocking=False, fixes=[] if not fix else [dict(title=fix['message'], edits=fix['edits'],
                 applicability=fix.get('applicability', 'unsafe'))]))
     return result
 
 
+def snapshot_input(text):
+    data = convert_source(text, 'utf-8').encode('utf-8')
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        tree = None
+    return data, tree
+
+
+cached_snapshot_input = lru_cache(maxsize=32)(snapshot_input)
+
+
 def write_snapshot(folder, source, filename, project=None, buffers=None):
-    import ast
     root = Path(project).resolve() if project and Path(project).is_dir() else Path(filename).resolve().parent
     active = Path(filename).resolve()
     overlays = {str(Path(k).resolve()): v for k, v in (buffers or {}).items()}
     overlays[str(active)] = source
-    pending, visited = [active], set()
-    def include(base, module):
-        parts = module.split('.') if module else []
-        for count in range(1, len(parts) + 1):
-            path = base.joinpath(*parts[:count])
-            for candidate in (path.with_suffix('.py'), path.with_suffix('.pyi'), path / '__init__.py'):
-                if str(candidate) in overlays or candidate.is_file(): pending.append(candidate)
+    pending, visited = deque([active]), set()
+    folder = Path(folder)
     while pending:
-        path = pending.pop(0).resolve()
+        path = pending.popleft().resolve()
         if path in visited: continue
         visited.add(path)
         try: relative = path.relative_to(root)
@@ -131,9 +137,11 @@ def write_snapshot(folder, source, filename, project=None, buffers=None):
         if text is None:
             text, _ = decode_source(path.read_bytes())
             text = text.replace('\r\n', '\n').replace('\r', '\n')
-        target = Path(folder) / relative
+        target = folder / relative
+        prepare = cached_snapshot_input if len(text) <= 100_000 else snapshot_input
+        data, tree = prepare(text)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(convert_source(text, 'utf-8'), encoding='utf-8')
+        target.write_bytes(data)
         # Package markers and their imports also participate in resolution.
         parent = path.parent
         while parent != root and root in parent.parents:
@@ -142,25 +150,18 @@ def write_snapshot(folder, source, filename, project=None, buffers=None):
             parent = parent.parent
         if len(visited) > 500:
             raise RuntimeError('本地依赖超过单次检查范围')
-        try: tree = ast.parse(text)
-        except SyntaxError: continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names: include(root, alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                base = path.parent if node.level else root
-                for _ in range(max(0, node.level - 1)): base = base.parent
-                include(base, node.module)
-                for alias in node.names:
-                    if alias.name != '*': include(base, '.'.join(filter(None, [node.module, alias.name])))
+        if tree is None:
+            continue
+        for candidate in import_candidates(tree, path, root, suffixes=('.py', '.pyi')):
+            if str(candidate) in overlays or candidate.is_file():
+                pending.append(candidate)
     try: relative = active.relative_to(root)
     except ValueError: relative = Path(active.name)
-    return Path(folder) / relative
+    return folder / relative
 
 
 def type_check(source, filename, project=None, buffers=None):
-    # Check a disposable snapshot, not the saved file. Imported local modules are
-    # copied with package paths and unsaved overlays, parsed statically, never executed.
+    # Check an isolated snapshot of local modules and unsaved overlays.
     with tempfile.TemporaryDirectory(prefix='pyvis-inspection-') as folder:
         snapshot = write_snapshot(folder, source, filename, project, buffers)
         config = Path(folder) / 'ty.toml'
@@ -171,17 +172,6 @@ def type_check(source, filename, project=None, buffers=None):
         args.append(str(snapshot))
         report = json.loads(run('ty', args, cwd=folder))
         result = []
-        hints = {'unresolved-reference': '检查名称的拼写、定义位置和当前作用域。',
-                 'unresolved-import': '检查模块名、项目中的文件位置，以及软件是否提供该学习库。',
-                 'import-not-found': '检查模块名、项目中的文件位置，以及软件是否提供该学习库。',
-                 'invalid-argument-type': '比较实际传入的值与参数要求的类型。',
-                 'missing-argument': '检查调用是否传入了所有必需参数。',
-                 'too-many-positional-arguments': '比较调用中的实参数量与函数的参数定义。',
-                 'unknown-argument': '检查关键字参数的名称是否与函数定义一致。',
-                 'missing-attribute': '检查该对象的数据类型，以及它是否具有此属性或方法。',
-                 'invalid-assignment': '检查赋值右侧的数据类型是否满足变量的类型声明。',
-                 'unsupported-operator': '检查两个操作数的类型，以及它们是否支持此运算。',
-                 'possibly-unresolved-reference': '检查该变量是否在每条可能到达此处的路径上都有赋值。'}
         for run_report in report.get('runs', []):
             for item in run_report.get('results', []):
                 locations = item.get('locations', [])
@@ -201,7 +191,7 @@ def type_check(source, filename, project=None, buffers=None):
                     column=region.get('startColumn', 1), end_line=region.get('endLine', region.get('startLine', 1)),
                     end_column=region.get('endColumn', region.get('startColumn', 1) + 1),
                     severity='error' if level == 'error' else 'warning', code=code,
-                    message=item.get('message', {}).get('text', ''), hint=hints.get(code, '结合对象类型、函数声明和当前执行路径检查标记处。'),
+                    message=item.get('message', {}).get('text', ''), hint=type_hint(code, '结合对象类型、函数声明和当前执行路径检查标记处。'),
                     engine='ty', blocking=False, fixes=[]))
         return result
 

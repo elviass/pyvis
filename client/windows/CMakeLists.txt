@@ -125,6 +125,7 @@ install(DIRECTORY "${pyvis_cpython_SOURCE_DIR}/" DESTINATION python COMPONENT Ru
   PATTERN "*._pth" EXCLUDE)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/python314._pth" DESTINATION python COMPONENT Runtime)
 install(DIRECTORY "../../runtime/pyvis_runtime" DESTINATION data/runtime COMPONENT Runtime
-  PATTERN "__pycache__" EXCLUDE PATTERN ".DS_Store" EXCLUDE)
+  PATTERN "__pycache__" EXCLUDE PATTERN ".DS_Store" EXCLUDE
+  PATTERN "*-macosx_*.whl" EXCLUDE)
 install(DIRECTORY "../../examples/" DESTINATION data/examples COMPONENT Runtime
   FILES_MATCHING PATTERN "*.py")

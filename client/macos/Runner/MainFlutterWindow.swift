@@ -18,11 +18,35 @@ class MainFlutterWindow: NSWindow {
 
     (NSApp.delegate as? AppDelegate)?.bindEditorCommands(flutterViewController.engine.binaryMessenger)
     bindAiCredentials(flutterViewController.engine.binaryMessenger)
+    bindSourceFile(flutterViewController.engine.binaryMessenger)
     RegisterGeneratedPlugins(registry: flutterViewController)
     let graphRegistrar = flutterViewController.registrar(forPlugin: "PyvisComfyCanvas")
     graphRegistrar.register(GraphCanvasFactory(messenger: graphRegistrar.messenger), withId: "dev.pyvis.comfy")
 
     super.awakeFromNib()
+  }
+}
+
+private func bindSourceFile(_ messenger: FlutterBinaryMessenger) {
+  let channel = FlutterMethodChannel(name: "dev.pyvis/source_file", binaryMessenger: messenger)
+  channel.setMethodCallHandler { call, result in
+    guard call.method == "write" else { result(FlutterMethodNotImplemented); return }
+    guard let arguments = call.arguments as? [String: Any],
+          let path = arguments["path"] as? String,
+          let data = arguments["data"] as? FlutterStandardTypedData else {
+      result(FlutterError(code: "invalid_source_file", message: "无效的源文件数据", details: nil))
+      return
+    }
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        try data.data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        DispatchQueue.main.async { result(nil) }
+      } catch {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "source_file_write", message: error.localizedDescription, details: nil))
+        }
+      }
+    }
   }
 }
 

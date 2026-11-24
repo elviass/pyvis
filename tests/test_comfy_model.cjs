@@ -196,6 +196,15 @@ test('wire routes avoid node obstacles and report overlapping nodes instead of c
   assert.equal(routing.route([30,0],[600,120],[[28,-100,160,100]]),null);
   assert.equal(routing.splineClear([30,0],[600,120],boxes), false);
 });
+test('moving a node into a wire path recomputes a clear route', () => {
+  const start = [30, 0], end = [600, 0];
+  const original = [[220, 100, 330, 175]], moved = [[220, -40, 330, 45]];
+  assert.ok(routing.splineClear(start, end, original));
+  assert.equal(routing.splineClear(start, end, moved), false);
+  const path = routing.route(start, end, moved);
+  assert.ok(path);
+  assert.ok(routing.clear([start, ...path, end], moved));
+});
 test('compact routing clears port stubs and interior cards on long and backward wires', () => {
   const source = [-8, -38, 192, 104], obstacle = [236,-38,440,105], target = [503,22,723,150];
   const a = [174, 18], b = [521, 67];

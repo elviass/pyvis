@@ -9,6 +9,44 @@ bool isLearningStop(Map e) =>
     e['kind'] == 'statement' ||
     (e['kind'] == 'call' && (e['frames'] as List? ?? []).length > 1);
 
+class ExecutionRecording {
+  final events = <Map<String, dynamic>>[];
+  final stops = <int>[];
+  bool hasStatement = false;
+
+  ExecutionRecording([Iterable<Map<String, dynamic>> initial = const []]) {
+    for (final event in initial) {
+      add(event);
+    }
+  }
+
+  void add(Map<String, dynamic> event) {
+    if (isLearningStop(event)) stops.add(events.length);
+    if (event['kind'] == 'statement') hasStatement = true;
+    events.add(event);
+  }
+
+  /// Finds the insertion point after the last stop at or before the cursor.
+  int stopInsertionIndex(int cursor) {
+    var low = 0;
+    var high = stops.length;
+    while (low < high) {
+      final mid = low + (high - low) ~/ 2;
+      if (stops[mid] <= cursor) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
+  Map<String, dynamic>? stepAt(int cursor) {
+    final index = stopInsertionIndex(cursor) - 1;
+    return index < 0 ? null : events[stops[index]];
+  }
+}
+
 class ExecutionFlow {
   final FlowPlace? previous, next;
   final FlowPlace current;

@@ -1,5 +1,8 @@
 """Offline editor analysis with CPython, AST and managed static tools; never execute learner code."""
 import ast
+from collections import deque
+from .local_imports import import_candidates
+from .source_encoding import source_tokens
 import base64
 import builtins
 import inspect
@@ -242,59 +245,57 @@ def unknown_names(source, filename, tree):
     return result
 
 
-def bracket_pairs(source):
-    import io
+def bracket_pairs(source, tokens=None):
     import tokenize
     stack, result = [], []
     closing = {')': '(', ']': '[', '}': '{'}
-    try:
-        for token in tokenize.generate_tokens(io.StringIO(source).readline):
-            if token.type != tokenize.OP: continue
-            if token.string in '([{': stack.append(token)
-            elif token.string in closing and stack and stack[-1].string == closing[token.string]:
-                opening = stack.pop()
-                result.append(dict(start=[opening.start[0], opening.start[1]], end=[token.start[0], token.start[1]]))
-    except (tokenize.TokenError, IndentationError, SyntaxError): pass
+    for token in source_tokens(source) if tokens is None else tokens:
+        if token.type != tokenize.OP:
+            continue
+        if token.string in '([{':
+            stack.append(token)
+        elif token.string in closing and stack and stack[-1].string == closing[token.string]:
+            opening = stack.pop()
+            result.append(dict(start=list(opening.start), end=list(token.start)))
     return result
 
 
 def analyze(source, filename, project=None, inspections=True, buffers=None, dictionary=()):
     diagnostics = compile_check(source, filename)
+    valid = not any(d['severity'] == 'error' for d in diagnostics)
     tree = recovered_tree(source)
-    if not any(d['severity'] == 'error' for d in diagnostics):
+    tokens = tuple(source_tokens(source))
+    if valid:
         diagnostics.extend(unknown_names(source, filename, tree))
     failures = []
-    if inspections and sys.platform != 'android' and not any(d['severity'] == 'error' for d in diagnostics):
+    if inspections and sys.platform != 'android' and valid:
         from .editor_tools import inspect_source
         extra, failures = inspect_source(source, filename, project or str(Path(filename).parent), buffers)
         diagnostics.extend(extra)
     if inspections:
         from .spelling import inspect_spelling
-        diagnostics.extend(inspect_spelling(source, filename, dictionary))
+        diagnostics.extend(inspect_spelling(source, filename, dictionary, tokens))
     from .inspection_presentation import apply_presentation
-    diagnostics = apply_presentation(diagnostics, source)
+    diagnostics = apply_presentation(diagnostics, source, tree if valid else None, tokens)
     diagnostics.sort(key=lambda d: (d['line'], d['column'], d['code']))
     symbols, members = symbols_for(tree)
     return dict(diagnostics=diagnostics, symbols=symbols, members=members, builtins=BUILTINS,
-                inspection_failures=failures, brackets=bracket_pairs(source), engines=['CPython', 'Jedi'] + ([] if sys.platform == 'android' else ['Ruff', 'ty']))
+                inspection_failures=failures, brackets=bracket_pairs(source, tokens), engines=['CPython', 'Jedi'] + ([] if sys.platform == 'android' else ['Ruff', 'ty']))
 
 
-def check_sources(sources, entry=None, project=None):
+def check_sources(sources, entry=None, project=None, source_errors=None):
     sources = {str(Path(name)): source for name, source in sources.items()}
-    pending = list(sources) if entry is None else [str(Path(entry))]
+    source_errors = {str(Path(name)): error for name, error in (source_errors or {}).items()}
+    pending = deque([*sources, *source_errors] if entry is None else [str(Path(entry))])
     root = Path(project) if project else Path(entry or '.').parent
     visited, diagnostics = set(), []
-    def include(base, module):
-        parts = module.split('.') if module else []
-        for i in range(1, len(parts) + 1):
-            path = base.joinpath(*parts[:i])
-            for candidate in [path.with_suffix('.py'), path / '__init__.py']:
-                if str(candidate) in sources and str(candidate) not in visited:
-                    pending.append(str(candidate))
     while pending:
-        filename = pending.pop(0)
+        filename = pending.popleft()
         if filename in visited: continue
         visited.add(filename)
+        if filename in source_errors:
+            diagnostics.append(issue(filename, 1, 1, source_errors[filename], code='SourceReadError'))
+            continue
         if filename not in sources:
             diagnostics.append(issue(filename, 1, 1, '入口文件不在当前源码快照中', code='MissingEntry'))
             continue
@@ -305,15 +306,10 @@ def check_sources(sources, entry=None, project=None):
         tree = ast.parse(source)
         diagnostics.extend(unknown_names(source, filename, tree))
         if entry is None: continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names: include(root, alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                base = Path(filename).parent if node.level else root
-                for _ in range(max(0, node.level - 1)): base = base.parent
-                include(base, node.module)
-                for alias in node.names:
-                    if alias.name != '*': include(base, '.'.join(filter(None, [node.module, alias.name])))
+        for candidate in import_candidates(tree, Path(filename), root):
+            name = str(candidate)
+            if name not in visited and (name in sources or name in source_errors):
+                pending.append(name)
     return dict(diagnostics=diagnostics, checked=sorted(visited))
 
 
@@ -341,7 +337,7 @@ def main():
                 from .inline_validation import validate_inline
                 result = validate_inline(request['source'], request['line'], request['column'], request['prediction'])
             elif request.get('action') == 'check':
-                result = check_sources(request['sources'], request.get('entry'), request.get('project'))
+                result = check_sources(request['sources'], request.get('entry'), request.get('project'), request.get('source_errors'))
             elif request.get('action') == 'decode_source':
                 from .source_encoding import decode_source
                 source, encoding = decode_source(base64.b64decode(request['data']))

@@ -74,6 +74,28 @@ Future<void> realIo(WidgetTester tester, Future<void> Function() action) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> advanceDemo(WidgetTester tester) async {
+  final next = find.descendant(
+      of: find.byTooltip('下一步'),
+      matching: find.byWidgetPredicate((widget) => widget is TextButton));
+  bool ready() =>
+      tester.widgetList<TextButton>(next).firstOrNull?.onPressed != null;
+  for (var i = 0; i < 10 && !ready(); i++) {
+    await realIo(tester, () async {});
+  }
+  expect(ready(), isTrue);
+  Object? sequence() => tester
+      .widgetList<LineTheater>(find.byType(LineTheater))
+      .firstOrNull
+      ?.event['seq'];
+  final before = sequence();
+  await realIo(tester, () => tester.tap(next));
+  for (var i = 0; i < 10 && sequence() == before; i++) {
+    await realIo(tester, () async {});
+  }
+  expect(sequence(), isNot(before));
+}
+
 Future<Directory> openFixture(WidgetTester tester, Map<String, String> files,
     {PyvisApp? app}) async {
   late Directory directory;
@@ -198,6 +220,11 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await realIo(tester, () => tester.tap(find.byTooltip('直接运行').first));
+    for (var i = 0;
+        i < 10 && find.textContaining('运行完成').evaluate().isEmpty;
+        i++) {
+      await realIo(tester, () async {});
+    }
     await tester.tap(find.text('代码流程图'));
     await tester.pumpAndSettle();
     expect(
@@ -243,6 +270,11 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.text('保存').last);
     });
+    for (var i = 0;
+        i < 10 && find.text('已保存 practice.py').evaluate().isEmpty;
+        i++) {
+      await realIo(tester, () async {});
+    }
     await tester.runAsync(() async {
       expect(await File('${directory.path}/practice.py').readAsString(),
           'print("saved")\n');
@@ -457,9 +489,7 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('演示运行').first);
     });
-    await realIo(tester, () async {
-      await tester.tap(find.byTooltip('下一步'));
-    });
+    await advanceDemo(tester);
     expect(find.byType(LineTheater), findsOneWidget);
     await tester.tap(find.byTooltip('停止运行'));
     await tester.pumpAndSettle();
@@ -604,9 +634,7 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('演示运行').first);
     });
-    await realIo(tester, () async {
-      await tester.tap(find.byTooltip('下一步'));
-    });
+    await advanceDemo(tester);
     final theater = tester.widget<LineTheater>(find.byType(LineTheater));
     expect(theater.event['line'], 1);
     expect(theater.event['statement_type'], 'Assign');
@@ -640,9 +668,7 @@ void main() {
       await tester.tap(find.byTooltip('演示运行').first);
     });
     Future<Map<String, dynamic>> next() async {
-      await realIo(tester, () async {
-        await tester.tap(find.byTooltip('下一步'));
-      });
+      await advanceDemo(tester);
       return tester.widget<LineTheater>(find.byType(LineTheater)).event;
     }
 
@@ -724,5 +750,8 @@ void main() {
       'sources': {'main.py': 'pass'}
     };
     expect(decodeTrace(jsonEncode(valid))['events'], hasLength(1));
+    final item = valid['events'] as List<Map<String, Object>>;
+    item.single['next_line'] = '2';
+    expect(() => decodeTrace(jsonEncode(valid)), throwsFormatException);
   });
 }

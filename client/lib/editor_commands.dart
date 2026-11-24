@@ -19,6 +19,20 @@ enum EditorCommand {
   goToLine,
 }
 
+const editorCommandLabels = {
+  EditorCommand.duplicate: '复制行或所选内容',
+  EditorCommand.definition: '转到声明或用法',
+  EditorCommand.documentation: '快速文档',
+  EditorCommand.parameters: '参数信息',
+  EditorCommand.renameVariable: '重命名变量…',
+  EditorCommand.format: '重新格式化代码',
+  EditorCommand.imports: '优化导入',
+  EditorCommand.intentions: '显示上下文操作',
+  EditorCommand.goToLine: '转到行:列',
+  EditorCommand.nextIssue: '下一个问题',
+  EditorCommand.previousIssue: '上一个问题',
+};
+
 class PyCharmKeymap extends CodeShortcutsActivatorsBuilder {
   final bool mac;
   const PyCharmKeymap(this.mac);

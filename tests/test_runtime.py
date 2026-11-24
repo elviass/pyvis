@@ -41,6 +41,64 @@ print(x, y, z, calls)
         self.assertIsNone(result['error'])
         self.assertEqual(result['output']['stdout'], '5 False True [2, 3, 4]\n')
 
+    def test_instrumentation_preserves_patterns_and_future_annotations(self):
+        result = self.run_code('''from __future__ import annotations
+from enum import Enum
+class Color(Enum):
+    RED = 1
+def name(value: list[int]) -> str:
+    match value:
+        case [Color.RED]:
+            return 'red'
+print(name([Color.RED]), name.__annotations__)
+''')
+        self.assertIsNone(result['error'])
+        self.assertEqual(result['output']['stdout'],
+                         "red {'value': 'list[int]', 'return': 'str'}\n")
+
+    def test_exception_recording_never_calls_user_string_formatter(self):
+        result = self.run_code('''class CustomError(Exception):
+    def __str__(self):
+        raise ValueError('called __str__')
+try:
+    raise CustomError('message')
+except CustomError:
+    print('caught')
+''')
+        self.assertIsNone(result['error'])
+        self.assertEqual(result['output']['stdout'], 'caught\n')
+
+    def test_recording_does_not_keep_weakly_referenced_objects_alive(self):
+        result = self.run_code('''import weakref
+class Box:
+    pass
+box = Box()
+ref = weakref.ref(box)
+del box
+print(ref() is None)
+''')
+        self.assertIsNone(result['error'])
+        self.assertEqual(result['output']['stdout'], 'True\n')
+
+    def test_unreadable_source_is_reported_only_when_used(self):
+        with tempfile.TemporaryDirectory() as folder:
+            entry = Path(folder) / 'main.py'
+            broken = entry.with_name('broken.py')
+            broken.write_bytes(b'\xff')
+            entry.write_text("print('ok')\n")
+            self.assertEqual(Recorder().run(entry)['output']['stdout'], 'ok\n')
+            entry.write_text('import broken\n')
+            self.assertEqual(Recorder().run(entry)['error']['file'], str(broken.resolve()))
+
+    def test_snapshot_budget_preserves_resolvable_references(self):
+        from pyvis_runtime.engine import Snapshot
+
+        root = [[[] for _ in range(100)] for _ in range(100)]
+        heap = Snapshot().capture([], (root,))['heap']
+        self.assertEqual(len(heap), 500)
+        self.assertTrue(all(item['ref'] in heap for obj in heap.values()
+                            for item in obj.get('items', []) if 'ref' in item))
+
     def test_recorded_branch_direction_does_not_test_a_value_twice(self):
         result = self.run_code('''class Value:
     def __bool__(self):

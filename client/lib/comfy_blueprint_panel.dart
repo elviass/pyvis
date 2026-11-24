@@ -57,6 +57,8 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
   int? line, sentLine;
   Timer? timer;
   Map<String, dynamic>? cachedScene;
+  Map<String, dynamic>? displayedScene;
+  final pendingLines = <Map>{};
   FlowSlice? currentSlice;
   List<Map> currentSections = [];
 
@@ -95,6 +97,7 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
       scope = 'main';
       group = selectedSection = selectedNode = detailId = null;
       cachedScene = null;
+      displayedScene = null;
     }
     if (widget.source != oldWidget.source ||
         widget.filename != oldWidget.filename) {
@@ -153,7 +156,7 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
             : Duration.zero, () async {
       try {
         final result = await parser.parse(source,
-            mode: widget.openNodes == null ? 'full' : 'overview');
+            mode: widget.openNodes == null ? 'interactive' : 'overview');
         if (!mounted || token != revision) return;
         setState(() {
           busy = false;
@@ -198,11 +201,32 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
       .where((v) => v['scope'] == scope)
       .firstOrNull;
 
+  Map? get lineView {
+    final available = lines;
+    return available.where((view) => view['line'] == line).firstOrNull ??
+        available.firstOrNull;
+  }
+
+  Future<void> loadLineView(Map view, String source) async {
+    try {
+      final response = await parser.lineView(
+          source, view['scope'] as String, view['line'] as int);
+      if (response['graph'] is! Map) {
+        throw StateError(response['error']?['message'] ?? '无法解析该行节点图');
+      }
+      view.addAll(response['graph'] as Map);
+      if (mounted && identical(lineView, view)) setState(invalidate);
+    } catch (error) {
+      view['loadError'] = '$error';
+      if (mounted && identical(lineView, view)) setState(() {});
+    } finally {
+      pendingLines.remove(view);
+    }
+  }
+
   Map<String, dynamic> scene() {
     if (cachedScene != null) return cachedScene!;
-    final view = lineMode
-        ? lines.where((v) => v['line'] == line).firstOrNull ?? lines.firstOrNull
-        : whole;
+    final view = lineMode ? lineView : whole;
     var nodes = (view?['nodes'] as List? ?? []).cast<Map>();
     currentSections = (view?['sections'] as List? ?? []).cast<Map>();
     final target = selectedSection ??
@@ -401,7 +425,24 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final data = graph == null || !showNodes ? null : scene();
+    final selectedLine = showNodes && lineMode ? lineView : null;
+    final waitingForLine =
+        selectedLine != null && !selectedLine.containsKey('nodes');
+    if (waitingForLine &&
+        !selectedLine.containsKey('loadError') &&
+        pendingLines.add(selectedLine)) {
+      final source = graphSource;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) loadLineView(selectedLine, source);
+      });
+    }
+    final data = graph == null || !showNodes
+        ? null
+        : waitingForLine
+            ? displayedScene
+            : displayedScene = scene();
+    final lineError =
+        waitingForLine ? selectedLine['loadError'] as String? : null;
     final reading = (graph?['reading'] as List? ?? []).cast<Map>();
     final scopes = (graph?['scopes'] as List? ?? []).cast<Map>();
     final filename = widget.filename.split(RegExp(r'[/\\]')).last;
@@ -576,7 +617,7 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
                           fontSize: 12, color: PyvisColors.muted)),
                 if (showNodes) const SizedBox(width: 10),
                 if (showNodes)
-                  Text(rendererStatus,
+                  Text(waitingForLine ? '正在解析本行…' : rendererStatus,
                       key: const ValueKey('renderer-status'),
                       style: const TextStyle(
                           fontSize: 12, color: PyvisColors.muted))
@@ -584,6 +625,14 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
       if (widget.compiledGraph != null &&
           (rendererStatus == '加载画布…' || rendererStatus == '绘制中…'))
         const LinearProgressIndicator(semanticsLabel: '正在绘制节点图'),
+      if (lineError != null)
+        ListTile(
+          title: Text(lineError),
+          trailing: TextButton(
+              onPressed: () =>
+                  setState(() => selectedLine?.remove('loadError')),
+              child: const Text('重试本行')),
+        ),
       if (parseError != null || (showNodes && canvasError != null))
         Container(
             key: const ValueKey('graph-error'),
@@ -635,14 +684,16 @@ class _ComfyBlueprintPanelState extends State<ComfyBlueprintPanel> {
                                       invalidate();
                                     }))),
                   if (data != null)
-                    KeyedSubtree(
-                        key: ValueKey(canvasGeneration),
-                        child: widget.canvasBuilder
-                                ?.call(context, data, onEvent) ??
-                            ComfyGraphCanvas(
-                                key: const ValueKey('comfy-canvas'),
-                                scene: data,
-                                onEvent: onEvent))
+                    IgnorePointer(
+                        ignoring: waitingForLine,
+                        child: KeyedSubtree(
+                            key: ValueKey(canvasGeneration),
+                            child: widget.canvasBuilder
+                                    ?.call(context, data, onEvent) ??
+                                ComfyGraphCanvas(
+                                    key: const ValueKey('comfy-canvas'),
+                                    scene: data,
+                                    onEvent: onEvent)))
                 ]))
     ]);
   }

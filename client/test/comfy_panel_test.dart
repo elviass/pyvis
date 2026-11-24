@@ -21,7 +21,47 @@ Future<void> parsed(WidgetTester tester) async {
   fail('Python AST did not reply');
 }
 
+Future<void> loadedLine(WidgetTester tester) async {
+  await tester.pump();
+  final waiting = find.text('正在解析本行…');
+  for (var i = 0; i < 100 && waiting.evaluate().isNotEmpty; i++) {
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pump();
+  }
+  expect(waiting, findsNothing);
+  expect(find.text('重试本行'), findsNothing);
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  testWidgets('opening line nodes follows the source cursor inside a function',
+      (tester) async {
+    Map<String, dynamic>? scene;
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: ComfyBlueprintPanel(
+                source:
+                    'def add(n):\n    value=n+1\n    return value\nx=add(2)\n',
+                filename: 'function-line.py',
+                activeLine: 2,
+                onLineSelected: (_) {},
+                canvasBuilder: (_, data, __) {
+                  scene = data;
+                  return const SizedBox();
+                }))));
+    await parsed(tester);
+    await tester.tap(find.text('节点图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('逐行'));
+    await loadedLine(tester);
+    expect(scene!['key'], contains('main/add@1|line:2'));
+    expect(scene!['activeLine'], 2);
+    final nodes = (scene!['nodes'] as List).cast<Map>();
+    expect(nodes.any((node) => node['kind'] == 'operator'), isTrue);
+    expect(nodes.any((node) => node['line'] == 4), isFalse);
+  });
+
   testWidgets('canvas error can be retried without changing the selected line',
       (tester) async {
     late ValueChanged<Map> event;
@@ -127,7 +167,7 @@ match mode:
     expect(selected, 4);
     expect(find.text('输出到控制台'), findsOneWidget);
     await tester.tap(find.text('查看本行节点'));
-    await tester.pumpAndSettle();
+    await loadedLine(tester);
     expect(atomScene!['activeLine'], 4);
     expect(atomScene!['sections'], isEmpty);
     expect(atomScene!['compactNodes'], isTrue);
@@ -198,7 +238,7 @@ match mode:
     expect((scene!['sections'] as List).any((s) => s['subflow_group'] != null),
         isTrue);
     await tester.tap(find.text('逐行'));
-    await tester.pump();
+    await loadedLine(tester);
     expect(scene!['sections'], isEmpty);
     event({'action': 'select', 'id': 'unused', 'line': 3.0});
     expect(selected, 3);

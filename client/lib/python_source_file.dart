@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:re_editor/re_editor.dart';
 
 import 'python_analysis_service.dart';
@@ -100,20 +102,55 @@ class PythonSourceFile {
       PythonAnalysisService service) async {
     final source = text.replaceAll('\n', format.lineEnding.value);
     final encoding = format.encoding;
+    final List<int> bytes;
     if ((encoding == 'utf-8' || encoding == 'utf-8-sig') &&
         !_hasPossibleCookie(source)) {
-      final bytes = utf8.encode(source);
-      await file.writeAsBytes(
-          encoding == 'utf-8-sig' ? [0xef, 0xbb, 0xbf, ...bytes] : bytes,
-          flush: true);
-      return;
+      final encoded = utf8.encode(source);
+      bytes =
+          encoding == 'utf-8-sig' ? [0xef, 0xbb, 0xbf, ...encoded] : encoded;
+    } else {
+      final result = await service.request({
+        'action': 'encode_source',
+        'source': source,
+        'encoding': encoding,
+      });
+      bytes = base64Decode(result['data'] as String);
     }
-    final result = await service.request({
-      'action': 'encode_source',
-      'source': source,
-      'encoding': encoding,
-    });
-    await file.writeAsBytes(base64Decode(result['data'] as String),
-        flush: true);
+
+    final target = await Link(file.path).exists()
+        ? File(await file.resolveSymbolicLinks())
+        : file.absolute;
+    if (Platform.isMacOS) {
+      try {
+        await const MethodChannel('dev.pyvis/source_file').invokeMethod<void>(
+            'write', {'path': target.path, 'data': Uint8List.fromList(bytes)});
+        return;
+      } on MissingPluginException {
+        // Flutter unit tests have no native window or file channel.
+      }
+    }
+    final oldStat = await target.stat();
+    final staging = await target.parent.createTemp('.pyvis-save-');
+    try {
+      final draft = File(p.join(staging.path, 'source'));
+      await draft.writeAsBytes(bytes, flush: true);
+      if (!Platform.isWindows && oldStat.type == FileSystemEntityType.file) {
+        final mode = oldStat.mode & 0x1ff;
+        if (((await draft.stat()).mode & 0x1ff) != mode) {
+          final result =
+              await Process.run('chmod', [mode.toRadixString(8), draft.path]);
+          if (result.exitCode != 0) {
+            throw FileSystemException('无法保留文件权限', target.path);
+          }
+        }
+      }
+      await draft.rename(target.path);
+    } finally {
+      try {
+        await staging.delete(recursive: true);
+      } on FileSystemException {
+        // A failed cleanup does not change whether the replacement succeeded.
+      }
+    }
   }
 }

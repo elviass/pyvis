@@ -485,50 +485,64 @@ class GraphBuilder(ControlFlow):
                 search = search.rsplit('/', 1)[0]
         annotate_value_types(self.nodes, self.edges)
         self.layout()
-        graph = {'whole_views': whole_views(self, self.scope_bodies), 'line_views': self.line_views(), 'granularity': 'atomic', 'nodes': self.nodes, 'edges': self.edges, 'scopes': self.scopes, 'collections': self.collections,
+        graph = {'whole_views': whole_views(self, self.scope_bodies), 'line_views': self.line_views(metadata=mode == 'interactive'), 'granularity': 'atomic', 'nodes': self.nodes, 'edges': self.edges, 'scopes': self.scopes, 'collections': self.collections,
                 'warnings': list(dict.fromkeys(self.warnings))}
 
-        if mode == "nodes":
+        if mode in ("nodes", "interactive"):
             calls = [edge for edge in self.edges if edge['kind'] == 'call']
             graph['edges'] = calls
             graph['nodes'] = [{key: nodes_by_id[target][key] for key in ('id', 'scope', 'line')}
                               for target in dict.fromkeys(edge['to'] for edge in calls)]
-        else:
+        if mode != "nodes":
             graph['reading'] = reading_flow(tree.body)
         return graph
 
-    def line_views(self):
+    def line_views(self, requested=None, metadata=False):
         views = []
         source_lines = self.source.splitlines()
         for scope in self.scopes:
+            if requested is not None and scope['id'] != requested[0]:
+                continue
             nodes = [n for n in self.nodes if n['scope'] == scope['id']]
             lookup = {n['id']: n for n in nodes}
-            local_edges = [e for e in self.edges if e['from'] in lookup and e['to'] in lookup]
-            for line in sorted({n['line'] for n in nodes}):
-                core = {n['id'] for n in nodes if n['line'] == line}
+            by_line, incoming, outgoing = {}, {}, {}
+            for node in nodes:
+                by_line.setdefault(node['line'], []).append(node)
+            if metadata:
+                views.extend({'scope': scope['id'], 'line': line} for line in sorted(by_line))
+                continue
+            order = {node_id: index for index, node_id in enumerate(lookup)}
+            for index, edge in enumerate(self.edges):
+                if edge['from'] in lookup and edge['to'] in lookup:
+                    outgoing.setdefault(edge['from'], []).append((index, edge))
+                    if edge['kind'] in ('data', 'binding'):
+                        incoming.setdefault(edge['to'], []).append(edge['from'])
+            for line, line_nodes in sorted(by_line.items()):
+                if requested is not None and line != requested[1]:
+                    continue
+                core = {n['id'] for n in line_nodes}
                 visible, queue = set(core), list(core)
                 while queue:
-                    target = queue.pop()
-                    for edge in local_edges:
-                        if edge['to'] != target or edge['kind'] not in ('data', 'binding'):
+                    for source_id in incoming.get(queue.pop(), ()):
+                        if source_id in visible:
                             continue
-                        source = lookup[edge['from']]
-                        if source['id'] in visible: continue
-                        visible.add(source['id'])
-                        # Carry variable origins into the selected line, without
-                        # expanding every assignment earlier in the program.
-                        if source['kind'] not in ('symbol', 'literal', 'variable', 'container', 'parameter'):
-                            queue.append(source['id'])
+                        visible.add(source_id)
+                        # Keep the immediate variable origin without expanding its history.
+                        if lookup[source_id]['kind'] not in ('symbol', 'literal', 'variable', 'container', 'parameter'):
+                            queue.append(source_id)
                 detailed = GraphBuilder('')
-                detailed.nodes = [{**n, 'context': n['id'] not in core} for n in nodes if n['id'] in visible]
-                detailed.edges = [e for e in local_edges if e['from'] in visible and e['to'] in visible]
+                detailed.nodes = [{**lookup[node_id], 'context': node_id not in core}
+                                  for node_id in sorted(visible, key=order.__getitem__)]
+                edges = sorted((i, edge) for node_id in visible for i, edge in outgoing.get(node_id, ())
+                               if edge['to'] in visible)
+                detailed.edges = [edge for _, edge in edges]
                 detailed.scopes = [{'id': scope['id'], 'name': scope['name']}]
                 detailed.layout()
-                owners = [n.get('statement_id') for n in nodes if n['line'] == line and n.get('statement_id')]
+                owners = [n['statement_id'] for n in line_nodes if n.get('statement_id')]
                 owner = next((o for o in owners if o.rsplit(':', 3)[1] == str(line)), owners[0] if owners else '')
                 parts = owner.rsplit(':', 3)
                 statement = self.lesson_nodes.get((int(parts[1]), int(parts[2]), parts[3])) if len(parts) == 4 else None
-                views.append({'scope': scope['id'], 'line': line, 'teaching': lesson([] if any(n['kind'] == 'entry' and n['line'] == line for n in nodes) else [statement] if statement else []),
+                views.append({'scope': scope['id'], 'line': line, 'teaching': lesson([] if any(n['kind'] == 'entry' for n in line_nodes) else [statement] if statement else []),
                     'code': source_lines[line - 1].strip() if 0 < line <= len(source_lines) else '',
                     'nodes': detailed.nodes, 'edges': detailed.edges,
                     'width': detailed.scopes[0]['width'], 'height': detailed.scopes[0]['height']})
@@ -610,6 +624,7 @@ def code_graph(source, mode="full"):
 
 
 def main():
+    compiled = None
     for line in sys.stdin:
         request_id = None
         try:
@@ -618,7 +633,23 @@ def main():
             source = request['source']
             if not isinstance(source, str) or len(source) > 150_000:
                 raise ValueError('代码过大或内容无效')
-            response = {'id': request_id, 'graph': code_graph(source, request.get('mode', 'full'))}
+            mode = request.get('mode', 'full')
+            if mode == 'interactive':
+                builder = GraphBuilder(source)
+                graph = builder.build(mode)
+                compiled = builder
+            elif mode == 'line':
+                if compiled is None or compiled.source != source:
+                    builder = GraphBuilder(source)
+                    builder.build('interactive')
+                    compiled = builder
+                views = compiled.line_views((request['scope'], request['line']))
+                if not views:
+                    raise ValueError('找不到该行的节点图')
+                graph = views[0]
+            else:
+                graph = code_graph(source, mode)
+            response = {'id': request_id, 'graph': graph}
         except SyntaxError as error:
             response = {'id': request_id, 'error': {'line': error.lineno, 'message': error.msg}}
         except (ValueError, TypeError, KeyError, RecursionError) as error:

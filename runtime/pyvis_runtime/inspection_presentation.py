@@ -4,11 +4,43 @@ See docs/pycharm-source-reference.md for scheme and inspection sources.
 """
 import re
 import ast
-import io
 import tokenize
 
+from .source_encoding import source_tokens
 
-def apply_presentation(issues, source):
+
+_IMPORT_HINT = '检查模块名、项目中的文件位置，以及软件是否提供该学习库。'
+_RUFF_HINTS = {
+    'F401': '删除未使用的导入，或在后续代码中使用它。',
+    'F841': '检查变量是否需要使用；也可以去掉无用的赋值。',
+    'F811': '检查此名称是否重复定义，避免覆盖前面的定义。',
+    'F823': '函数内给名称赋值后，它通常被视为局部变量；检查赋值与读取的顺序。',
+    'E722': '说明要捕获的异常类型，避免掩盖意外错误。',
+}
+_TYPE_HINTS = {
+    'unresolved-reference': '检查名称的拼写、定义位置和当前作用域。',
+    'unresolved-import': _IMPORT_HINT,
+    'import-not-found': _IMPORT_HINT,
+    'invalid-argument-type': '比较实际传入的值与参数要求的类型。',
+    'missing-argument': '检查调用是否传入了所有必需参数。',
+    'too-many-positional-arguments': '比较调用中的实参数量与函数的参数定义。',
+    'unknown-argument': '检查关键字参数的名称是否与函数定义一致。',
+    'missing-attribute': '检查该对象的数据类型，以及它是否具有此属性或方法。',
+    'invalid-assignment': '检查赋值右侧的数据类型是否满足变量的类型声明。',
+    'unsupported-operator': '检查两个操作数的类型，以及它们是否支持此运算。',
+    'possibly-unresolved-reference': '检查该变量是否在每条可能到达此处的路径上都有赋值。',
+}
+
+
+def ruff_hint(code):
+    return _RUFF_HINTS.get(code, '检查标记处的写法、空白和名称使用。')
+
+
+def type_hint(code, fallback):
+    return _TYPE_HINTS.get(code, fallback)
+
+
+def apply_presentation(issues, source, tree=None, tokens=None):
     lines = source.split('\n')
     for issue in issues:
         code, engine = issue['code'], issue.get('engine')
@@ -37,12 +69,11 @@ def apply_presentation(issues, source):
                     issue['end_column'] = last[-1].end()+1
     # A PyCharm suppression comment applies to the following statement/suite.
     # Read comments through tokenize so string content cannot disable checks.
-    comments = []
-    try:
-        for token in tokenize.generate_tokens(io.StringIO(source).readline):
-            if token.type == tokenize.COMMENT: comments.append(token)
-    except (tokenize.TokenError, IndentationError, SyntaxError): pass
-    try: statements = sorted((n for n in ast.walk(ast.parse(source)) if isinstance(n,ast.stmt)), key=lambda n:(n.lineno,n.col_offset))
+    if 'noinspection' not in source:
+        return issues
+    lexical = source_tokens(source) if tokens is None else tokens
+    comments = (token for token in lexical if token.type == tokenize.COMMENT)
+    try: statements = sorted((n for n in ast.walk(tree if tree is not None else ast.parse(source)) if isinstance(n,ast.stmt)), key=lambda n:(n.lineno,n.col_offset))
     except SyntaxError: statements=[]
     suppressed=[]
     for comment in comments:

@@ -215,29 +215,19 @@ class _EditorPageState extends State<EditorPage> {
   final stageScroll = ScrollController(keepScrollOffset: false);
   int? stageSequence;
   int fileLoadToken = 0;
-  List<Map<String, dynamic>> _events = [];
-  List<Map<String, dynamic>> get events => _events;
-  final playbackStops = <int>[];
-  bool hasStatement = false;
+  ExecutionRecording recording = ExecutionRecording();
+  List<Map<String, dynamic>> get events => recording.events;
+  set events(List<Map<String, dynamic>> initial) {
+    recording = ExecutionRecording(initial);
+  }
+  List<int> get playbackStops => recording.stops;
   bool codeSyncScheduled = false;
-
-  set events(List<Map<String, dynamic>> recording) {
-    _events = recording;
-    playbackStops.clear();
-    hasStatement = false;
-    for (final event in recording) {
-      indexEvent(event);
-    }
-  }
-
-  void indexEvent(Map<String, dynamic> event) {
-    if (isLearningStop(event)) playbackStops.add(event['seq'] as int);
-    if (event['kind'] == 'statement') hasStatement = true;
-  }
 
   Map<String, dynamic> sources = {};
   Map<String, dynamic>? error;
   List<File> files = [];
+  int projectScan = 0;
+  Future<void>? fileRefreshTask;
   String? currentFile, project, entry;
   String status = '打开示例，观察程序里的每一次变化';
   String console = '';
@@ -500,7 +490,7 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  void activateDocument(EditorDocument document) {
+  void activateDocument(EditorDocument document, {bool updateEntry = true}) {
     renameHint = null;
     recentFiles.remove(document.path);
     recentFiles.insert(0, document.path);
@@ -534,7 +524,7 @@ class _EditorPageState extends State<EditorPage> {
     editor = document.controller;
     _lastText = editor.text;
     currentFile = document.path;
-    entry = currentFile;
+    if (updateEntry) entry = currentFile;
     signatures = [];
     signatureSource = null;
     signatureSelection = null;
@@ -675,8 +665,7 @@ class _EditorPageState extends State<EditorPage> {
                 : '运行完成 · 可在代码流程图回看';
         prompt = null;
       } else if (value.containsKey('seq')) {
-        events.add(value);
-        indexEvent(value);
+        recording.add(value);
         if (running && demo) {
           // A Python return can produce several completed statements before the
           // next gate. Keep the first requested stop visible; later ones belong
@@ -689,7 +678,7 @@ class _EditorPageState extends State<EditorPage> {
           } else if (playbackStops.isEmpty) {
             cursor = events.length - 1;
           }
-        } else if (running && (isLearningStop(value) || !hasStatement)) {
+        } else if (running && (isLearningStop(value) || !recording.hasStatement)) {
           cursor = events.length - 1;
           inspectedTraceLine = null;
         }
@@ -703,16 +692,12 @@ class _EditorPageState extends State<EditorPage> {
         if (value['kind'] == 'input') prompt = null;
       }
     });
-    if (Platform.isAndroid) {
-      if (codeSyncScheduled) return;
-      codeSyncScheduled = true;
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
-        codeSyncScheduled = false;
-        if (mounted) syncCodePosition();
-      });
-    } else {
-      syncCodePosition();
-    }
+    if (codeSyncScheduled) return;
+    codeSyncScheduled = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      codeSyncScheduled = false;
+      if (mounted) syncCodePosition();
+    });
   }
 
   void syncCodePosition() {
@@ -1429,21 +1414,21 @@ class _EditorPageState extends State<EditorPage> {
             shortcut: macKeys ? '⌘C' : 'Ctrl+C'),
         EditorMenuEntry('paste', '粘贴', () => editor.paste(),
             shortcut: macKeys ? '⌘V' : 'Ctrl+V', enabled: editorWritable),
-        for (final item in const {
-          EditorCommand.duplicate: '复制行或所选内容',
-          EditorCommand.definition: '转到声明或用法',
-          EditorCommand.documentation: '快速文档',
-          EditorCommand.parameters: '参数信息',
-          EditorCommand.renameVariable: '重命名变量…',
-          EditorCommand.format: '重新格式化代码',
-          EditorCommand.imports: '优化导入',
-          EditorCommand.intentions: '显示上下文操作',
-          EditorCommand.goToLine: '转到行:列',
-        }.entries)
-          EditorMenuEntry(item.key.name, item.value, () {
+        for (final command in const [
+          EditorCommand.duplicate,
+          EditorCommand.definition,
+          EditorCommand.documentation,
+          EditorCommand.parameters,
+          EditorCommand.renameVariable,
+          EditorCommand.format,
+          EditorCommand.imports,
+          EditorCommand.intentions,
+          EditorCommand.goToLine,
+        ])
+          EditorMenuEntry(command.name, editorCommandLabels[command]!, () {
             editorFocus.requestFocus();
-            editorCommands[item.key]!();
-          }, shortcut: keymap.label(item.key), enabled: editorWritable),
+            editorCommands[command]!();
+          }, shortcut: keymap.label(command), enabled: editorWritable),
         EditorMenuEntry('inspect', '检查代码', checkCode),
       ];
 
@@ -1642,17 +1627,14 @@ class _EditorPageState extends State<EditorPage> {
           return;
         }
         final d = definitions.first;
-        final originalEntry = entry;
-        final originalProject = project;
-        if (d['file'] != currentFile) await openFile(File(d['file']));
-        if (!mounted) return;
-        entry = originalEntry;
-        if (originalProject != null) {
-          project = originalProject;
-          if (!p.isWithin(originalProject, currentFile!)) {
-            documents[currentFile]?.readOnly = true;
-          }
-          refreshFiles();
+        final definitionPath = d['file'] as String;
+        if (definitionPath != currentFile) {
+          await openFile(File(definitionPath),
+              updateEntry: false, preserveProject: project != null);
+        }
+        if (!mounted || currentFile != File(definitionPath).absolute.path) return;
+        if (project != null && !p.isWithin(project!, currentFile!)) {
+          documents[currentFile]?.readOnly = true;
         }
         goToSource(
             (d['line'] as int) - 1,
@@ -1787,14 +1769,11 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> locateDiagnostic(Map<String, dynamic> diagnostic) async {
     final file = diagnostic['file'] as String;
     if (file != currentFile) {
-      final originalEntry = entry;
       final originalStatus = status;
-      await openFile(File(file));
-      if (!mounted || file != currentFile) return;
-      setState(() {
-        entry = originalEntry;
-        status = originalStatus;
-      });
+      await openFile(File(file), updateEntry: false);
+      if (!mounted) return;
+      setState(() => status = originalStatus);
+      if (file != currentFile) return;
     }
     final lines = editor.text.split('\n');
     final line =
@@ -2100,6 +2079,7 @@ class _EditorPageState extends State<EditorPage> {
       }
       final text = savingEditor.text;
       final format = original?.format ?? defaultSourceFormat;
+      final originalProject = project;
       await PythonSourceFile.write(File(targetPath), text, format, semantics);
       if (!mounted) return true;
       if (targetPath != previousPath) {
@@ -2126,7 +2106,15 @@ class _EditorPageState extends State<EditorPage> {
           status = '已保存 ${p.basename(targetPath)}';
         });
       }
-      refreshFiles();
+      if (project != originalProject) {
+        await refreshFiles();
+      } else if (project != null &&
+          p.isWithin(project!, targetPath) &&
+          !p.split(p.relative(targetPath, from: project)).any(excludedProjectName) &&
+          !files.any((file) => p.equals(file.absolute.path, targetPath))) {
+        setState(() => files = [...files, File(targetPath)]
+          ..sort((a, b) => a.path.compareTo(b.path)));
+      }
       return true;
     } catch (e) {
       reportError('保存失败：$e');
@@ -2185,7 +2173,8 @@ class _EditorPageState extends State<EditorPage> {
     return action == 'discard' || (action == 'save' && await save());
   }
 
-  Future<void> openFile(File file) async {
+  Future<void> openFile(File file,
+      {bool updateEntry = true, bool preserveProject = false}) async {
     if (!mounted) return;
     if (chatTabOpen) setState(() => chatTabSelected = false);
     final path = file.absolute.path;
@@ -2193,7 +2182,9 @@ class _EditorPageState extends State<EditorPage> {
     final existing = documents[path];
     if (existing != null || currentFile == path) {
       if (fileBusy) setState(() => fileBusy = false);
-      if (existing != null && currentFile != path) activateDocument(existing);
+      if (existing != null && currentFile != path) {
+        activateDocument(existing, updateEntry: updateEntry);
+      }
       return;
     }
     setState(() => fileBusy = true);
@@ -2202,11 +2193,12 @@ class _EditorPageState extends State<EditorPage> {
       if (!mounted || token != fileLoadToken) return;
       final document = EditorDocument(path, source.text, format: source.format);
       documents[path] = document;
-      if (project == null || !p.isWithin(project!, path)) {
+      if (!preserveProject && (project == null || !p.isWithin(project!, path))) {
         project = p.dirname(path);
       }
-      activateDocument(document);
-      refreshFiles();
+      activateDocument(document, updateEntry: updateEntry);
+      await refreshFiles();
+      if (!mounted || token != fileLoadToken) return;
       setState(() => status = '已打开 ${p.basename(path)}');
     } catch (error) {
       if (token == fileLoadToken) reportError('无法打开文件：$error');
@@ -2215,36 +2207,50 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  void refreshFiles() {
-    if (project == null) return;
+  bool excludedProjectName(String name) =>
+      name.startsWith('.') ||
+      const ['__pycache__', 'venv', 'node_modules'].contains(name);
+
+  Future<void> refreshFiles() {
+    final refresh = scanProjectFiles();
+    fileRefreshTask = refresh;
+    return refresh;
+  }
+
+  Future<void> scanProjectFiles() async {
+    final root = project;
+    if (root == null) return;
+    final scan = ++projectScan;
+    bool active() => mounted && scan == projectScan && project == root;
+    final list = <File>[];
+    final pending = [Directory(root)];
     try {
-      final list = Directory(project!)
-          .listSync(recursive: true, followLinks: false)
-          .whereType<File>()
-          .where((file) {
-        final parts = p.split(p.relative(file.path, from: project));
-        return p.extension(file.path).toLowerCase() == '.py' &&
-            !parts.any((part) =>
-                part.startsWith('.') ||
-                const ['__pycache__', 'venv', 'node_modules'].contains(part));
-      }).toList()
-        ..sort((a, b) => a.path.compareTo(b.path));
-      if (mounted) setState(() => files = list);
-    } on FileSystemException catch (e) {
-      // Selecting one file grants that file, not its parent directory, on macOS.
-      // Keep a useful single-file view instead of stale files from the old root.
-      if (Platform.isMacOS && const [1, 13].contains(e.osError?.errorCode)) {
-        if (mounted) {
-          setState(() => files = documents.keys
-              .where((path) => p.isWithin(project!, path))
-              .map(File.new)
-              .toList());
+      while (pending.isNotEmpty && active()) {
+        await for (final item in pending.removeLast().list(followLinks: false)) {
+          if (!active()) return;
+          final name = p.basename(item.path);
+          if (excludedProjectName(name)) continue;
+          if (item is Directory) pending.add(item);
+          if (item is File && p.extension(name).toLowerCase() == '.py') {
+            list.add(item);
+          }
         }
-      } else {
-        reportError('读取项目失败：$e');
       }
-    } catch (e) {
-      reportError('读取项目失败：$e');
+      list.sort((a, b) => a.path.compareTo(b.path));
+      if (active()) setState(() => files = list);
+    } on FileSystemException catch (error) {
+      if (!active()) return;
+      // A macOS file picker may grant the file without granting its parent.
+      if (Platform.isMacOS && const [1, 13].contains(error.osError?.errorCode)) {
+        setState(() => files = documents.keys
+            .where((path) => p.isWithin(root, path))
+            .map(File.new)
+            .toList());
+      } else {
+        reportError('读取项目失败：$error');
+      }
+    } catch (error) {
+      if (active()) reportError('读取项目失败：$error');
     }
   }
 
@@ -2269,13 +2275,15 @@ class _EditorPageState extends State<EditorPage> {
       project = folder;
       entry = null;
       currentFile = null;
+      files = [];
     });
-    refreshFiles();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final document in oldDocuments) {
         if (document.controller != editor) document.dispose();
       }
     });
+    await refreshFiles();
+    if (!mounted || project != folder || currentFile != null) return;
     if (files.isNotEmpty) {
       await openFile(files.firstWhere((f) => p.basename(f.path) == 'main.py',
           orElse: () => files.first));
@@ -2296,6 +2304,8 @@ class _EditorPageState extends State<EditorPage> {
     });
     try {
       if (!await saveAllDocuments()) return;
+      await fileRefreshTask;
+      if (!mounted) return;
       if (entry == null || project == null) return;
       analysisTimer?.cancel();
       analysisGeneration++;
@@ -2305,23 +2315,22 @@ class _EditorPageState extends State<EditorPage> {
       });
       final checkedEntry = entry!, checkedProject = project!;
       final checkedBuffer = editor.text;
-      Map<String, String> snapshot;
-      try {
-        snapshot = {};
-        for (final path in {
-          ...files.map((file) => file.absolute.path),
-          checkedEntry
-        }) {
+      final snapshot = <String, String>{};
+      final sourceErrors = <String, String>{};
+      for (final path in {
+        ...files.map((file) => file.absolute.path),
+        checkedEntry
+      }) {
+        try {
           snapshot[path] =
               (await PythonSourceFile.read(File(path), semantics)).text;
+        } catch (error) {
+          sourceErrors[path] = '无法读取运行源码：$error';
         }
-      } catch (e) {
-        reportError('无法读取运行源码：$e');
-        return;
       }
       try {
-        final result =
-            await analysis.check(snapshot, checkedEntry, checkedProject);
+        final result = await analysis.check(snapshot, checkedEntry, checkedProject,
+            sourceErrors: sourceErrors);
         if (!mounted) return;
         if (entry != checkedEntry ||
             project != checkedProject ||
@@ -2423,10 +2432,12 @@ class _EditorPageState extends State<EditorPage> {
 
   void move(int direction) {
     if (!blueprintMode || !showExecution) return;
-    final stops = playbackStops;
-    final target = direction < 0
-        ? stops.where((seq) => seq < cursor).lastOrNull
-        : stops.where((seq) => seq > cursor).firstOrNull;
+    final index = direction < 0
+        ? recording.stopInsertionIndex(cursor - 1) - 1
+        : recording.stopInsertionIndex(cursor);
+    final target = index >= 0 && index < playbackStops.length
+        ? playbackStops[index]
+        : null;
     if (target != null) {
       seek(target, keepPlaying: playing);
     } else if (direction > 0 && canAdvanceDemo) {
@@ -2509,9 +2520,8 @@ class _EditorPageState extends State<EditorPage> {
       runtime.stop();
       timer?.cancel();
       setState(() {
-        events = (archive['events'] as List)
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        recording = ExecutionRecording(
+            (archive['events'] as List).cast<Map<String, dynamic>>());
         sources = Map<String, dynamic>.from(archive['sources'] ?? {});
         cursor = 0;
         error = archive['error'];
@@ -2846,7 +2856,9 @@ class _EditorPageState extends State<EditorPage> {
                           if (name == '.' ||
                               name == '..' ||
                               RegExp(r'[<>:"/\\|?*]').hasMatch(name) ||
-                              name.endsWith('.')) return '请输入有效的文件夹名称';
+                              name.endsWith('.')) {
+                            return '请输入有效的文件夹名称';
+                          }
                           return null;
                         })),
                 actions: [
@@ -3250,14 +3262,7 @@ class _EditorPageState extends State<EditorPage> {
                   child: consolePane())
           ]));
 
-  Map<String, dynamic>? get selectedStep {
-    for (var i = events.isEmpty ? -1 : cursor.clamp(0, events.length - 1);
-        i >= 0;
-        i--) {
-      if (isLearningStop(events[i])) return events[i];
-    }
-    return null;
-  }
+  Map<String, dynamic>? get selectedStep => recording.stepAt(cursor);
 
   String? get replayFile =>
       ((selectedStep ?? event)?['file'] as String?) ??
@@ -3874,23 +3879,25 @@ class _EditorPageState extends State<EditorPage> {
       icon: const Icon(Icons.more_vert, size: 18),
       onSelected: (command) => editorCommands[command]!(),
       itemBuilder: (ctx) => [
-            for (final item in {
-              if (Platform.isAndroid) EditorCommand.duplicate: '复制行或所选内容',
-              if (Platform.isAndroid) EditorCommand.nextIssue: '下一个问题',
-              if (Platform.isAndroid) EditorCommand.previousIssue: '上一个问题',
-              EditorCommand.renameVariable: '重命名变量…',
-              EditorCommand.format: '重新格式化代码',
-              EditorCommand.imports: '优化导入',
-              EditorCommand.parameters: '参数信息',
-              EditorCommand.documentation: '快速文档',
-              EditorCommand.goToLine: '转到行:列',
-              EditorCommand.intentions: '显示上下文操作'
-            }.entries)
+            for (final command in [
+              if (Platform.isAndroid) ...[
+                EditorCommand.duplicate,
+                EditorCommand.nextIssue,
+                EditorCommand.previousIssue,
+              ],
+              EditorCommand.renameVariable,
+              EditorCommand.format,
+              EditorCommand.imports,
+              EditorCommand.parameters,
+              EditorCommand.documentation,
+              EditorCommand.goToLine,
+              EditorCommand.intentions,
+            ])
               IdeMenuItem(
-                  value: item.key,
+                  value: command,
                   height: Platform.isAndroid ? 48 : 28,
-                  child: IdeMenuLabel(item.value,
-                      shortcut: keymap.label(item.key))),
+                  child: IdeMenuLabel(editorCommandLabels[command]!,
+                      shortcut: keymap.label(command))),
           ]);
 
   Widget editorTabs({bool collapsed = false}) => Container(
@@ -4338,7 +4345,7 @@ class _EditorPageState extends State<EditorPage> {
 
   Widget playback() {
     final stops = playbackStops;
-    final index = stops.lastIndexWhere((seq) => seq <= cursor);
+    final index = recording.stopInsertionIndex(cursor) - 1;
     final canStep = (stops.isNotEmpty && stops.last > cursor) || canAdvanceDemo;
     final count = index < 0 ? '尚未执行' : '${index + 1} / ${stops.length} 步';
     final timeline = Row(children: [

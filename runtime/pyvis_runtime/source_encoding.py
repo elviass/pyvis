@@ -9,6 +9,14 @@ _COOKIE = re.compile(r'^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)', re.ASCII)
 _BLANK_OR_COMMENT = re.compile(r'^[ \t\f]*(?:#|$)')
 
 
+def source_tokens(source):
+    """Keep tokens produced before a syntax error in a partial edit."""
+    try:
+        yield from tokenize.generate_tokens(io.StringIO(source).readline)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+
+
 def decode_source(data):
     # Check the first two logical lines even for files using legacy CR endings.
     header = b'\n'.join(re.split(rb'\r\n|\r|\n', data, maxsplit=2)[:2])
