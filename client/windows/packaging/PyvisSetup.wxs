@@ -2,8 +2,8 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-    <Property Id="PyvisScope" Value="Machine" />
-    <Property Id="PyvisPreviousScope" Value="Machine" />
+    <Property Id="PyvisScope" Value="User" />
+    <Property Id="PyvisPreviousScope" Value="User" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <UI Id="PyvisSetup">
       <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
@@ -40,7 +40,7 @@
           <Publish Property="ALLUSERS" Value="1" Condition='PyvisScope = "Machine"' Order="2" />
           <Publish Property="INSTALLFOLDER" Value="[LocalAppDataFolder]Programs\Pyvis\"
                    Condition='PyvisScope = "User" AND PyvisScope &lt;&gt; PyvisPreviousScope' Order="3" />
-          <Publish Property="INSTALLFOLDER" Value="[ProgramFiles64Folder]Pyvis\"
+          <Publish Property="INSTALLFOLDER" Value="[%ProgramW6432]\Pyvis\"
                    Condition='PyvisScope = "Machine" AND PyvisScope &lt;&gt; PyvisPreviousScope' Order="4" />
           <Publish Property="PyvisPreviousScope" Value="[PyvisScope]" Order="5" />
           <Publish Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="6" />
