@@ -2995,6 +2995,103 @@ class _EditorPageState extends State<EditorPage> {
 
   void showSearch() => finder.findMode();
 
+  Widget windowsTitleBar() => ListenableBuilder(
+    listenable: editor,
+    builder: (context, _) {
+      Widget item(String label, VoidCallback? action, {String? shortcut}) =>
+          MenuItemButton(
+            onPressed: action,
+            child: IdeMenuLabel(label, shortcut: shortcut),
+          );
+      final canEdit = !welcome && editorWritable && !editor.isComposing;
+      final canRun = !welcome && !running && !checkingRun && entry != null;
+      void changeHistory(VoidCallback action) {
+        editorContextMenu.hide(context);
+        completionPopup.dismiss();
+        decorations.dismissInline();
+        action();
+      }
+
+      return WindowsTitleBar(
+        workspaceTitle: welcome
+            ? 'Pyvis · 欢迎页'
+            : project == null
+            ? 'Pyvis'
+            : p.basename(project!),
+        menus: {
+          '文件': [
+            item('新建项目…', createProject),
+            item('新建 Python 文件…', welcome ? welcomeScript : createFile),
+            item('打开项目…', pickProject),
+            item('打开 Python 文件…', openPythonFile, shortcut: 'Ctrl+O'),
+            const Divider(),
+            item('全部保存', welcome ? null : saveAllDocuments, shortcut: 'Ctrl+S'),
+            item(
+              '另存为…',
+              welcome ? null : () => save(saveAs: true),
+              shortcut: 'Ctrl+Shift+S',
+            ),
+          ],
+          '编辑': [
+            item(
+              '撤回',
+              canEdit && editor.canUndo
+                  ? () => changeHistory(editor.undo)
+                  : null,
+            ),
+            item(
+              '恢复',
+              canEdit && editor.canRedo
+                  ? () => changeHistory(editor.redo)
+                  : null,
+            ),
+            const Divider(),
+            item('查找', welcome ? null : showSearch, shortcut: 'Ctrl+F'),
+            item('替换', welcome ? null : finder.replaceMode, shortcut: 'Ctrl+R'),
+          ],
+          '视图': [
+            item('返回欢迎页', welcome ? null : returnToWelcome),
+            item(
+              '编辑代码',
+              welcome ? null : () => setState(() => switchWorkspace(false)),
+            ),
+            item(
+              '代码流程图',
+              welcome ? null : () => setState(() => switchWorkspace(true)),
+            ),
+            const Divider(),
+            item(
+              '项目面板',
+              welcome ? null : () => setState(() => showProject = !showProject),
+            ),
+            item('控制台', welcome ? null : toggleConsole),
+          ],
+          '运行': [
+            item(
+              '直接运行',
+              canRun ? () => run(false) : null,
+              shortcut: 'Shift+F10',
+            ),
+            item('演示运行', canRun ? () => run(true) : null, shortcut: 'Shift+F9'),
+            item('停止运行', running ? stopRun : null),
+            item('检查代码', welcome ? null : checkCode, shortcut: 'Ctrl+F7'),
+            const Divider(),
+            item('打开执行记录', running || checkingRun ? null : importTrace),
+            item(
+              '保存执行记录',
+              events.isNotEmpty || console.isNotEmpty ? exportTrace : null,
+            ),
+          ],
+          '帮助': [
+            item('设置…', openEditorSettings),
+            item('键盘映射…', () => openEditorSettings(initialPage: 3)),
+            item('关于 Pyvis', openAbout),
+          ],
+        },
+      );
+    },
+  );
+
   @override
   Widget build(BuildContext context) {
     syncNativeRunMenu();
@@ -3034,7 +3131,7 @@ class _EditorPageState extends State<EditorPage> {
         child: Scaffold(
             backgroundColor: panel,
             body: Column(children: [
-              if (Platform.isWindows) const WindowsTitleBar(),
+              if (Platform.isWindows) windowsTitleBar(),
               if (welcome)
                 SizedBox(
                     height: 42,

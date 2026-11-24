@@ -27,6 +27,7 @@ constexpr DWORD kWindowStyle =
 // Match the logical dimensions of the Flutter title bar and its three buttons.
 constexpr int kTitleBarHeight = 36;
 constexpr int kCaptionButtonWidth = 46;
+constexpr wchar_t kExpandedMenuProperty[] = L"PyvisExpandedTitleBarMenu";
 constexpr UINT_PTR kChildFrameSubclass = 1;
 // DWMWA_BORDER_COLOR is available at runtime on Windows 11.
 constexpr DWORD kBorderColorAttribute = 34;
@@ -56,6 +57,14 @@ LRESULT HitTestFrame(HWND window, LPARAM position) {
   }
 
   if (point.y < MulDiv(kTitleBarHeight, dpi, 96)) {
+    int menu_width = client.right < MulDiv(240, dpi, 96) ? 36 : 72;
+    if (client.right >= MulDiv(500, dpi, 96) &&
+        GetProp(window, kExpandedMenuProperty)) {
+      menu_width += 5 * 48;  // Match the five categories in the Flutter menu.
+    }
+    if (point.x < MulDiv(menu_width, dpi, 96)) {
+      return HTCLIENT;
+    }
     const int from_right = client.right - point.x;
     if (from_right > MulDiv(3 * kCaptionButtonWidth, dpi, 96)) {
       return HTCAPTION;
@@ -308,6 +317,10 @@ Win32Window::MessageHandler(HWND hwnd,
       maximize_pressed_ = false;
       break;
 
+    case WM_NCDESTROY:
+      RemoveProp(hwnd, kExpandedMenuProperty);
+      break;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -387,6 +400,15 @@ RECT Win32Window::GetClientArea() {
 
 HWND Win32Window::GetHandle() {
   return window_handle_;
+}
+
+void Win32Window::SetTitleBarMenuExpanded(bool expanded) {
+  if (expanded) {
+    SetProp(window_handle_, kExpandedMenuProperty,
+            reinterpret_cast<HANDLE>(static_cast<INT_PTR>(1)));
+  } else {
+    RemoveProp(window_handle_, kExpandedMenuProperty);
+  }
 }
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {

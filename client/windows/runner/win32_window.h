@@ -56,6 +56,8 @@ class Win32Window {
   RECT GetClientArea();
 
  protected:
+  void SetTitleBarMenuExpanded(bool expanded);
+
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that
   // inheriting classes can handle.

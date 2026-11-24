@@ -40,6 +40,11 @@ bool FlutterWindow::OnCreate() {
       ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE);
     } else if (command == "close") {
       PostMessage(window, WM_CLOSE, 0, 0);
+    } else if (command == "menuExpanded") {
+      const auto* expanded = std::get_if<bool>(call.arguments());
+      if (expanded) {
+        SetTitleBarMenuExpanded(*expanded);
+      }
     } else {
       result->NotImplemented();
       return;
