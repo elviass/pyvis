@@ -3132,7 +3132,9 @@ class _EditorPageState extends State<EditorPage> {
             backgroundColor: panel,
             body: Column(children: [
               if (Platform.isWindows) windowsTitleBar(),
-              if (welcome)
+              if (!welcome)
+                mainToolbar(narrow)
+              else if (!Platform.isWindows)
                 SizedBox(
                     height: 42,
                     child: Row(children: [
@@ -3143,9 +3145,7 @@ class _EditorPageState extends State<EditorPage> {
                       const Spacer(),
                       ib('settings', '设置', openEditorSettings),
                       const SizedBox(width: 10)
-                    ]))
-              else
-                mainToolbar(narrow),
+                    ])),
               if (welcome)
                 Expanded(child: welcomeBody(MediaQuery.sizeOf(context).width))
               else
