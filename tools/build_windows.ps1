@@ -71,12 +71,11 @@ try {
     }
 
     if ($Format -in @('Both', 'MSI')) {
-        $installer = Join-Path $client 'windows\packaging\Pyvis.wxs'
-        $icon = Join-Path $client 'windows\runner\resources\app_icon.ico'
+        $installer = Join-Path $client 'windows\packaging'
         $msi = Join-Path $output "Pyvis-$version-win-x64.msi"
-        Invoke-Checked $Wix @('build', '-arch', 'x64',
-            '-d', "PackageVersion=$version", '-d', "AppIcon=$icon",
-            '-bindpath', "payload=$release", '-out', $msi, $installer)
+        Invoke-Checked $Wix @('build', '-arch', 'x64', '-ext', 'WixToolset.UI.wixext/6.0.2',
+            '-d', "PackageVersion=$version", '-bindpath', "payload=$release", '-out', $msi,
+            (Join-Path $installer 'Pyvis.wxs'), (Join-Path $installer 'PyvisSetup.wxs'))
         Write-Host "MSI: $msi"
     }
 } finally {

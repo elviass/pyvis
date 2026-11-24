@@ -62,7 +62,7 @@ flutter build macos --release
 
 **Windows x64**（Visual Studio C++ 桌面构建工具、WiX 6）
 
-在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，默认生成 MSI 和便携 ZIP。可用 `-Format MSI` 或 `-Format Portable` 只构建其中一种。两种包均内置 CPython，产物位于 `client/build/windows/packages/`。MSI 需要管理员权限，安装到 `Program Files\Pyvis` 并添加开始菜单入口。GitHub Actions 的 `Pyvis-Windows-x64` 构建产物也提供两个文件。[Windows 打包脚本](tools/build_windows.ps1)
+构建 MSI 需安装 WiX 6.0.2，并运行 `wix extension add -g WixToolset.UI.wixext/6.0.2`。在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，默认生成 MSI 和便携 ZIP。可用 `-Format MSI` 或 `-Format Portable` 只构建其中一种。两种包均内置 CPython，产物位于 `client/build/windows/packages/`。MSI 安装向导可选择为当前用户或所有用户安装、修改安装目录，以及是否创建桌面快捷方式。两种范围均添加开始菜单入口，为所有用户安装需要管理员权限。重新安装旧版 0.1.1 MSI 时，选择与原安装相同的范围可就地更新。GitHub Actions 的 `Pyvis-Windows-x64` 构建产物也提供两个文件。[Windows 打包脚本](tools/build_windows.ps1)
 
 ## 开发资料
 

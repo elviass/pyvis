@@ -23,6 +23,8 @@ jobs:
           $wix = Join-Path $env:RUNNER_TEMP wix
           dotnet tool install wix --tool-path $wix --version 6.0.2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $wix wix.exe) extension add -g WixToolset.UI.wixext/6.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           @((Join-Path $sdk bin), $wix) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build portable ZIP and MSI
@@ -48,24 +50,58 @@ jobs:
           Expand-Archive $zip.FullName $portable
           Confirm-PyvisPayload $portable
           $msi = Get-Item "$packages/*.msi"
-          $log = Join-Path $env:RUNNER_TEMP pyvis-msi.log
-          $installed = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
-          if ($installed.ExitCode -ne 0) {
-            Get-Content $log -Tail 80
-            throw "MSI install returned $($installed.ExitCode)."
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class ShellIcon {
+            [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+            public static extern uint ExtractIconEx(string path, int index, IntPtr large, IntPtr small, uint count);
           }
-          $app = Join-Path $env:ProgramFiles Pyvis
-          $shortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Pyvis.lnk'
-          try {
-            Confirm-PyvisPayload $app
-            if (!(Test-Path $shortcut)) { throw 'Start menu shortcut is missing.' }
-          } finally {
-            $removed = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
-            if ($removed.ExitCode -ne 0) { throw "MSI uninstall returned $($removed.ExitCode)." }
+          '@
+          $shell = New-Object -ComObject WScript.Shell
+          function Confirm-ShortcutIcon([string]$Path, [string]$Executable, [switch]$Desktop) {
+            if (!(Test-Path -LiteralPath $Path)) { throw "Shortcut is missing: $Path" }
+            $link = $shell.CreateShortcut($Path)
+            $icon = ($link.IconLocation -replace ',\s*-?\d+$', '').Trim('"')
+            if ($Desktop) {
+              if ($link.TargetPath -ne $Executable) { throw "Incorrect shortcut target: $($link.TargetPath)" }
+              if (!$icon) { $icon = $link.TargetPath }
+            }
+            if (!(Test-Path -LiteralPath $icon) -or
+                (Get-FileHash -LiteralPath $icon).Hash -ne (Get-FileHash -LiteralPath $Executable).Hash -or
+                [ShellIcon]::ExtractIconEx($icon, -1, [IntPtr]::Zero, [IntPtr]::Zero, 0) -eq 0) {
+              throw "Shortcut icon did not resolve to the Pyvis executable icon: $Path"
+            }
           }
-          if ((Test-Path "$app/pyvis_editor.exe") -or (Test-Path $shortcut)) {
-            throw 'MSI uninstall left the executable or the shortcut behind.'
+          function Test-Msi([string]$App, [string]$Programs, [string]$Desktop, [string]$Options, [switch]$CreateDesktop) {
+            $log = Join-Path $env:RUNNER_TEMP pyvis-msi.log
+            $installed = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$log`" $Options" -Wait -PassThru
+            if ($installed.ExitCode -ne 0) {
+              Get-Content $log -Tail 80
+              throw "MSI install returned $($installed.ExitCode)."
+            }
+            $exe = Join-Path $App pyvis_editor.exe
+            $startLink = Join-Path ([Environment]::GetFolderPath($Programs)) 'Pyvis.lnk'
+            $desktopLink = Join-Path ([Environment]::GetFolderPath($Desktop)) 'Pyvis.lnk'
+            try {
+              Confirm-PyvisPayload $App
+              Confirm-ShortcutIcon $startLink $exe
+              if ($CreateDesktop) {
+                Confirm-ShortcutIcon $desktopLink $exe -Desktop
+              } elseif (Test-Path -LiteralPath $desktopLink) {
+                throw 'An unrequested desktop shortcut was created.'
+              }
+            } finally {
+              $removed = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
+              if ($removed.ExitCode -ne 0) { throw "MSI uninstall returned $($removed.ExitCode)." }
+            }
+            foreach ($path in @($exe, $startLink, $desktopLink)) {
+              if (Test-Path -LiteralPath $path) { throw "MSI uninstall left $path behind." }
+            }
           }
+          Test-Msi (Join-Path $env:ProgramFiles Pyvis) CommonPrograms CommonDesktopDirectory 'ALLUSERS=1'
+          $custom = Join-Path $env:LOCALAPPDATA 'Pyvis custom folder'
+          Test-Msi $custom Programs DesktopDirectory "ALLUSERS=2 MSIINSTALLPERUSER=1 INSTALLFOLDER=`"$custom`" PYVISDESKTOP=1" -CreateDesktop
 
       - name: Upload Windows x64 packages
         uses: actions/upload-artifact@v4

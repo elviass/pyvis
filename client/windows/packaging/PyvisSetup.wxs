@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="PyvisScope" Value="Machine" />
+    <Property Id="PyvisPreviousScope" Value="Machine" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <UI Id="PyvisSetup">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <DialogRef Id="BrowseDlg" />
+      <DialogRef Id="InstallDirDlg" />
+      <DialogRef Id="VerifyReadyDlg" />
+      <DialogRef Id="MaintenanceWelcomeDlg" />
+      <DialogRef Id="MaintenanceTypeDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+
+      <Dialog Id="PyvisOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Heading" Type="Text" X="20" Y="16" Width="330" Height="20"
+                 Text="{\WixUI_Font_Title}Installation options" />
+        <Control Id="Scope" Type="RadioButtonGroup" X="20" Y="53" Width="330" Height="63"
+                 Property="PyvisScope">
+          <RadioButtonGroup Property="PyvisScope">
+            <RadioButton Value="Machine" X="0" Y="0" Width="325" Height="18"
+                         Text="Install for &amp;all users (requires administrator permission)" />
+            <RadioButton Value="User" X="0" Y="31" Width="325" Height="18"
+                         Text="Install &amp;only for me" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="DesktopShortcut" Type="CheckBox" X="20" Y="132" Width="330" Height="18"
+                 Property="PYVISDESKTOP" CheckBoxValue="1" Text="Create a &amp;desktop shortcut" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+                 Default="yes" Text="!(loc.WixUINext)">
+          <Publish Property="ALLUSERS" Value="{}" Condition='PyvisScope = "User"' Order="1" />
+          <Publish Property="ALLUSERS" Value="1" Condition='PyvisScope = "Machine"' Order="2" />
+          <Publish Property="INSTALLFOLDER" Value="[LocalAppDataFolder]Programs\Pyvis\"
+                   Condition='PyvisScope = "User" AND PyvisScope &lt;&gt; PyvisPreviousScope' Order="3" />
+          <Publish Property="INSTALLFOLDER" Value="[ProgramFiles64Folder]Pyvis\"
+                   Condition='PyvisScope = "Machine" AND PyvisScope &lt;&gt; PyvisPreviousScope' Order="4" />
+          <Publish Property="PyvisPreviousScope" Value="[PyvisScope]" Order="5" />
+          <Publish Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="6" />
+          <Publish Event="NewDialog" Value="InstallDirDlg" Order="7" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+                 Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="PyvisOptionsDlg" />
+      <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Property="_BrowseProperty"
+               Value="[WIXUI_INSTALLDIR]" Order="1" />
+      <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2" />
+      <Publish Dialog="BrowseDlg" Control="OK" Event="CheckTargetPath" Value="[_BrowseProperty]" Order="1" />
+      <Publish Dialog="BrowseDlg" Control="OK" Event="SetTargetPath" Value="[_BrowseProperty]" Order="2" />
+      <Publish Dialog="BrowseDlg" Control="OK" Event="EndDialog" Value="Return" Order="3" />
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="CheckTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1" />
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="2" />
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="3" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Condition="Installed" />
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" />
+      <InstallUISequence>
+        <Show Dialog="PyvisOptionsDlg" Before="ProgressDlg" Condition="NOT Installed" />
+      </InstallUISequence>
+    </UI>
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>
