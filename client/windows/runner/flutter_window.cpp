@@ -27,6 +27,26 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "pyvis/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    const HWND window = GetHandle();
+    const auto& command = call.method_name();
+    if (command == "minimize") {
+      ShowWindow(window, SW_MINIMIZE);
+    } else if (command == "toggleMaximize") {
+      ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE);
+    } else if (command == "close") {
+      PostMessage(window, WM_CLOSE, 0, 0);
+    } else {
+      result->NotImplemented();
+      return;
+    }
+    result->Success();
+  });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +60,10 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (window_channel_) {
+    window_channel_->SetMethodCallHandler(nullptr);
+    window_channel_.reset();
+  }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -51,6 +75,30 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_SIZE && window_channel_ && wparam != SIZE_MINIMIZED) {
+    const bool maximized = wparam == SIZE_MAXIMIZED;
+    if (maximized_ != maximized) {
+      maximized_ = maximized;
+      window_channel_->InvokeMethod(
+          "maximized", std::make_unique<flutter::EncodableValue>(maximized));
+    }
+  }
+  if (window_channel_ &&
+      (message == WM_NCMOUSEMOVE || message == WM_NCMOUSELEAVE)) {
+    const bool hovered = message == WM_NCMOUSEMOVE && wparam == HTMAXBUTTON;
+    if (maximize_hovered_ != hovered) {
+      maximize_hovered_ = hovered;
+      if (hovered) {
+        TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT),
+                                 TME_LEAVE | TME_NONCLIENT, hwnd, 0};
+        TrackMouseEvent(&tracking);
+      }
+      window_channel_->InvokeMethod(
+          "maximizeHovered",
+          std::make_unique<flutter::EncodableValue>(hovered));
+    }
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

@@ -1,7 +1,9 @@
 #include "win32_window.h"
 
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -17,6 +19,63 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+// Match the logical dimensions of the Flutter title bar and its three buttons.
+constexpr int kTitleBarHeight = 36;
+constexpr int kCaptionButtonWidth = 46;
+constexpr UINT_PTR kChildFrameSubclass = 1;
+// DWMWA_BORDER_COLOR is available at runtime on Windows 11.
+constexpr DWORD kBorderColorAttribute = 34;
+constexpr DWORD kNoBorderColor = 0xFFFFFFFE;
+
+LRESULT HitTestFrame(HWND window, LPARAM position) {
+  const UINT dpi = GetDpiForWindow(window);
+  POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
+  ScreenToClient(window, &point);
+  RECT client{};
+  GetClientRect(window, &client);
+
+  if (!IsZoomed(window)) {
+    const int padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    const int edge_x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + padding;
+    const int edge_y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + padding;
+    const bool left = point.x < edge_x;
+    const bool right = point.x >= client.right - edge_x;
+    if (point.y < edge_y) {
+      return left ? HTTOPLEFT : right ? HTTOPRIGHT : HTTOP;
+    }
+    if (point.y >= client.bottom - edge_y) {
+      return left ? HTBOTTOMLEFT : right ? HTBOTTOMRIGHT : HTBOTTOM;
+    }
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+  }
+
+  if (point.y < MulDiv(kTitleBarHeight, dpi, 96)) {
+    const int from_right = client.right - point.x;
+    if (from_right > MulDiv(3 * kCaptionButtonWidth, dpi, 96)) {
+      return HTCAPTION;
+    }
+    if (from_right > MulDiv(kCaptionButtonWidth, dpi, 96) &&
+        from_right <= MulDiv(2 * kCaptionButtonWidth, dpi, 96)) {
+      return HTMAXBUTTON;
+    }
+  }
+  return HTCLIENT;
+}
+
+LRESULT CALLBACK ChildFrameProc(HWND child, UINT message, WPARAM wparam,
+                                LPARAM lparam, UINT_PTR id, DWORD_PTR) {
+  if (message == WM_NCHITTEST &&
+      HitTestFrame(GetParent(child), lparam) != HTCLIENT) {
+    // Let the parent receive non-client mouse messages over the Flutter view.
+    return HTTRANSPARENT;
+  }
+  if (message == WM_NCDESTROY) {
+    RemoveWindowSubclass(child, ChildFrameProc, id);
+  }
+  return DefSubclassProc(child, message, wparam, lparam);
+}
 
 /// Registry key for app theme preference.
 ///
@@ -145,6 +204,11 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
+  DwmSetWindowAttribute(window, kBorderColorAttribute, &kNoBorderColor,
+                        sizeof(kNoBorderColor));
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                   SWP_FRAMECHANGED);
 
   return OnCreate();
 }
@@ -179,6 +243,59 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_NCCALCSIZE: {
+      if (wparam && IsZoomed(hwnd)) {
+        auto* bounds = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        const HMONITOR monitor =
+            MonitorFromRect(&bounds->rgrc[0], MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        if (GetMonitorInfo(monitor, &info)) {
+          bounds->rgrc[0] = info.rcWork;
+        }
+      }
+      return 0;
+    }
+
+    case WM_NCHITTEST:
+      return HitTestFrame(hwnd, lparam);
+
+    case WM_GETMINMAXINFO: {
+      DefWindowProc(hwnd, message, wparam, lparam);
+      auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
+      const int min_width = MulDiv(190, GetDpiForWindow(hwnd), 96);
+      if (limits->ptMinTrackSize.x < min_width) {
+        limits->ptMinTrackSize.x = min_width;
+      }
+      return 0;
+    }
+
+    case WM_NCLBUTTONDOWN:
+      if (wparam == HTMAXBUTTON) {
+        SetCapture(hwnd);
+        maximize_pressed_ = true;
+        return 0;
+      }
+      break;
+
+    case WM_LBUTTONUP:
+      if (maximize_pressed_) {
+        maximize_pressed_ = false;
+        ReleaseCapture();
+        POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ClientToScreen(hwnd, &point);
+        if (HitTestFrame(hwnd, MAKELPARAM(point.x, point.y)) == HTMAXBUTTON) {
+          PostMessage(hwnd, WM_SYSCOMMAND,
+                      IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE, 0);
+        }
+        return 0;
+      }
+      break;
+
+    case WM_CAPTURECHANGED:
+      maximize_pressed_ = false;
+      break;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -241,6 +358,7 @@ Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
 void Win32Window::SetChildContent(HWND content) {
   child_content_ = content;
   SetParent(content, window_handle_);
+  SetWindowSubclass(content, ChildFrameProc, kChildFrameSubclass, 0);
   RECT frame = GetClientArea();
 
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,

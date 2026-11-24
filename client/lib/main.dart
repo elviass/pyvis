@@ -41,6 +41,7 @@ import 'python_source_file.dart';
 import 'editor_settings.dart';
 import 'inspection_style.dart';
 import 'local_completion.dart';
+import 'windows_title_bar.dart';
 
 void main() => runApp(const PyvisApp(startOnWelcome: true));
 
@@ -66,9 +67,18 @@ class PyvisApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Pyvis · Python 学习编辑器',
         theme: pyvisTheme(),
-        builder: (context, child) => Platform.isAndroid
-            ? ColoredBox(color: bg, child: SafeArea(child: child!))
-            : child!,
+        builder: (context, child) {
+          if (Platform.isAndroid) {
+            return ColoredBox(color: bg, child: SafeArea(child: child!));
+          }
+          if (Platform.isWindows) {
+            return Column(children: [
+              const WindowsTitleBar(),
+              Expanded(child: child!),
+            ]);
+          }
+          return child!;
+        },
         home: EditorPage(
             aiEnabled: aiEnabled,
             startOnWelcome: startOnWelcome,
