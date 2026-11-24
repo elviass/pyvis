@@ -67,18 +67,9 @@ class PyvisApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Pyvis · Python 学习编辑器',
         theme: pyvisTheme(),
-        builder: (context, child) {
-          if (Platform.isAndroid) {
-            return ColoredBox(color: bg, child: SafeArea(child: child!));
-          }
-          if (Platform.isWindows) {
-            return Column(children: [
-              const WindowsTitleBar(),
-              Expanded(child: child!),
-            ]);
-          }
-          return child!;
-        },
+        builder: (context, child) => Platform.isAndroid
+            ? ColoredBox(color: bg, child: SafeArea(child: child!))
+            : child!,
         home: EditorPage(
             aiEnabled: aiEnabled,
             startOnWelcome: startOnWelcome,
@@ -3043,6 +3034,7 @@ class _EditorPageState extends State<EditorPage> {
         child: Scaffold(
             backgroundColor: panel,
             body: Column(children: [
+              if (Platform.isWindows) const WindowsTitleBar(),
               if (welcome)
                 SizedBox(
                     height: 42,
