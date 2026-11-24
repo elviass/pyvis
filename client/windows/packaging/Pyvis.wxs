@@ -1,37 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Pyvis" Manufacturer="Pyvis" Version="$(var.PackageVersion)"
-           UpgradeCode="2E404B15-0C22-44F4-8E62-609D079A784E" Scope="perUser">
+           UpgradeCode="2E404B15-0C22-44F4-8E62-609D079A784E" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Pyvis is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="PyvisIcon" SourceFile="$(var.AppIcon)" />
     <Property Id="ARPPRODUCTICON" Value="PyvisIcon" />
 
-    <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="UserPrograms" Name="Programs">
-        <Directory Id="INSTALLFOLDER" Name="Pyvis" />
-      </Directory>
-    </StandardDirectory>
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="PyvisMenu" Name="Pyvis">
-        <Component Id="PyvisShortcut" Guid="308F0F8E-751A-4A3B-99BC-5861F9C40E91">
-          <Shortcut Id="PyvisStartMenu" Name="Pyvis" Target="[INSTALLFOLDER]pyvis_editor.exe"
-                    WorkingDirectory="INSTALLFOLDER" Icon="PyvisIcon" />
-          <RemoveFolder Id="RemovePyvisMenu" On="uninstall" />
-          <RegistryValue Root="HKCU" Key="Software\Pyvis" Name="Installed"
-                         Type="integer" Value="1" KeyPath="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Pyvis">
+        <Component Id="PyvisExecutable" Guid="308F0F8E-751A-4A3B-99BC-5861F9C40E91">
+          <File Id="PyvisExe" Source="!(bindpath.payload)\pyvis_editor.exe" KeyPath="yes">
+            <Shortcut Id="PyvisStartMenu" Name="Pyvis" Directory="ProgramMenuFolder"
+                      WorkingDirectory="INSTALLFOLDER" Icon="PyvisIcon" Advertise="yes" />
+          </File>
         </Component>
       </Directory>
     </StandardDirectory>
     <Feature Id="Pyvis" Title="Pyvis" Level="1">
       <ComponentGroupRef Id="PyvisFiles" />
-      <ComponentRef Id="PyvisShortcut" />
+      <ComponentRef Id="PyvisExecutable" />
     </Feature>
   </Package>
 
   <Fragment>
     <ComponentGroup Id="PyvisFiles" Directory="INSTALLFOLDER">
-      <Files Include="!(bindpath.payload)\**" />
+      <Files Include="!(bindpath.payload)\**">
+        <Exclude Files="!(bindpath.payload)\pyvis_editor.exe" />
+      </Files>
     </ComponentGroup>
   </Fragment>
 </Wix>

@@ -33,12 +33,20 @@ jobs:
         shell: pwsh
         run: |
           $packages = 'client/build/windows/packages'
+          $iconAsset = 'data/flutter_assets/assets/ide/pyvis.png'
+          $iconHash = (Get-FileHash 'client/assets/ide/pyvis.png').Hash
+          function Confirm-PyvisPayload([string]$Directory) {
+            if (!(Test-Path "$Directory/pyvis_editor.exe")) { throw 'Pyvis executable is missing.' }
+            if ((Get-FileHash "$Directory/$iconAsset").Hash -ne $iconHash) {
+              throw 'Packaged in-app icon differs from the source asset.'
+            }
+            & "$Directory/python/python.exe" -B -c 'import pyvis_runtime'
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged CPython failed.' }
+          }
           $zip = Get-Item "$packages/*-portable.zip"
           $portable = Join-Path $env:RUNNER_TEMP pyvis-portable
           Expand-Archive $zip.FullName $portable
-          if (!(Test-Path "$portable/pyvis_editor.exe")) { throw 'Portable executable is missing.' }
-          & "$portable/python/python.exe" -B -c 'import pyvis_runtime'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Confirm-PyvisPayload $portable
           $msi = Get-Item "$packages/*.msi"
           $log = Join-Path $env:RUNNER_TEMP pyvis-msi.log
           $installed = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
@@ -46,14 +54,17 @@ jobs:
             Get-Content $log -Tail 80
             throw "MSI install returned $($installed.ExitCode)."
           }
+          $app = Join-Path $env:ProgramFiles Pyvis
+          $shortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Pyvis.lnk'
           try {
-            $app = Join-Path $env:LOCALAPPDATA 'Programs\Pyvis'
-            if (!(Test-Path "$app/pyvis_editor.exe")) { throw 'Installed executable is missing.' }
-            & "$app/python/python.exe" -B -c 'import pyvis_runtime'
-            if ($LASTEXITCODE -ne 0) { throw 'Installed CPython failed.' }
+            Confirm-PyvisPayload $app
+            if (!(Test-Path $shortcut)) { throw 'Start menu shortcut is missing.' }
           } finally {
             $removed = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
             if ($removed.ExitCode -ne 0) { throw "MSI uninstall returned $($removed.ExitCode)." }
+          }
+          if ((Test-Path "$app/pyvis_editor.exe") -or (Test-Path $shortcut)) {
+            throw 'MSI uninstall left the executable or the shortcut behind.'
           }
 
       - name: Upload Windows x64 packages
