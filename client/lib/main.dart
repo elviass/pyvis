@@ -67,9 +67,13 @@ class PyvisApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Pyvis · Python 学习编辑器',
         theme: pyvisTheme(),
-        builder: (context, child) => Platform.isAndroid
-            ? ColoredBox(color: bg, child: SafeArea(child: child!))
-            : child!,
+        builder: (context, child) {
+          if (Platform.isWindows) return WindowsWindowFrame(child: child!);
+          if (Platform.isAndroid) {
+            return ColoredBox(color: bg, child: SafeArea(child: child!));
+          }
+          return child!;
+        },
         home: EditorPage(
             aiEnabled: aiEnabled,
             startOnWelcome: startOnWelcome,

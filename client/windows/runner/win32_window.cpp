@@ -27,6 +27,7 @@ constexpr DWORD kWindowStyle =
 // Match the logical dimensions of the Flutter title bar and its three buttons.
 constexpr int kTitleBarHeight = 36;
 constexpr int kCaptionButtonWidth = 46;
+constexpr int kWindowCornerRadius = 9;
 constexpr wchar_t kExpandedMenuProperty[] = L"PyvisExpandedTitleBarMenu";
 constexpr UINT_PTR kChildFrameSubclass = 1;
 // DWMWA_BORDER_COLOR is available at runtime on Windows 11.
@@ -222,6 +223,7 @@ bool Win32Window::Create(const std::wstring& title,
   SetWindowPos(window, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                    SWP_FRAMECHANGED);
+  UpdateWindowRegion(window);
 
   return OnCreate();
 }
@@ -336,10 +338,12 @@ Win32Window::MessageHandler(HWND hwnd,
 
       SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top, newWidth,
                    newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+      UpdateWindowRegion(hwnd);
 
       return 0;
     }
     case WM_SIZE: {
+      UpdateWindowRegion(hwnd);
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
         // Size and position the child window.
@@ -408,6 +412,38 @@ void Win32Window::SetTitleBarMenuExpanded(bool expanded) {
             reinterpret_cast<HANDLE>(static_cast<INT_PTR>(1)));
   } else {
     RemoveProp(window_handle_, kExpandedMenuProperty);
+  }
+}
+
+void Win32Window::UpdateWindowRegion(HWND window) {
+  if (IsIconic(window)) return;
+  if (IsZoomed(window)) {
+    if (rounded_size_.cx != 0) {
+      rounded_size_ = {};
+      SetWindowRgn(window, nullptr, TRUE);
+    }
+    return;
+  }
+
+  RECT bounds{};
+  if (!GetWindowRect(window, &bounds)) return;
+  const SIZE size{bounds.right - bounds.left, bounds.bottom - bounds.top};
+  const UINT dpi = GetDpiForWindow(window);
+  if (size.cx <= 0 || size.cy <= 0 ||
+      (size.cx == rounded_size_.cx && size.cy == rounded_size_.cy &&
+       dpi == rounded_dpi_)) {
+    return;
+  }
+
+  const int diameter = MulDiv(2 * kWindowCornerRadius, dpi, 96);
+  HRGN region = CreateRoundRectRgn(0, 0, size.cx, size.cy, diameter, diameter);
+  if (!region) return;
+  // SetWindowRgn sends window-position messages and takes ownership on success.
+  rounded_size_ = size;
+  rounded_dpi_ = dpi;
+  if (SetWindowRgn(window, region, TRUE) == 0) {
+    rounded_size_ = {};
+    DeleteObject(region);
   }
 }
 

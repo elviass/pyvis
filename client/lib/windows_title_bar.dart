@@ -1,6 +1,50 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+final _windowMaximized = ValueNotifier(false);
+
+class WindowsWindowFrame extends StatelessWidget {
+  const WindowsWindowFrame({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+        valueListenable: _windowMaximized,
+        child: child,
+        builder: (context, maximized, child) => CustomPaint(
+          foregroundPainter: maximized ? null : const _WindowOutline(),
+          child: child,
+        ),
+      );
+}
+
+class _WindowOutline extends CustomPainter {
+  const _WindowOutline();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.shortestSide < 1) return;
+    final bounds = Offset.zero & size;
+    const gradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xff6e5e78), Color(0xff494550), Color(0xff383a40)],
+      stops: [0, .38, 1],
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bounds.deflate(.5), const Radius.circular(8.5)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..shader = gradient.createShader(bounds),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_WindowOutline oldDelegate) => false;
+}
+
 class WindowsTitleBar extends StatefulWidget {
   const WindowsTitleBar({
     super.key,
@@ -38,6 +82,7 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
       switch (call.method) {
         case 'maximized':
           setState(() => _maximized = value);
+          _windowMaximized.value = value;
         case 'maximizeHovered':
           setState(() => _maximizeHovered = value);
       }
@@ -126,59 +171,71 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colors.surface,
-      child: SizedBox(
-        height: _height,
-        child: LayoutBuilder(builder: (context, constraints) {
-          final wide = constraints.maxWidth >= _wideMenuWidth;
-          return Row(children: [
-            if (constraints.maxWidth >= 240)
-              SizedBox(
-                width: _menuButtonWidth,
-                child: Center(
-                  child: Image.asset('assets/ide/pyvis.png',
-                      width: 18, height: 18),
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xff42364c),
+              const Color(0xff322b3b),
+              colors.surface,
+            ],
+            stops: const [0, .29, .68],
+          ),
+        ),
+        child: SizedBox(
+          height: _height,
+          child: LayoutBuilder(builder: (context, constraints) {
+            final wide = constraints.maxWidth >= _wideMenuWidth;
+            return Row(children: [
+              if (constraints.maxWidth >= 240)
+                SizedBox(
+                  width: _menuButtonWidth,
+                  child: Center(
+                    child: Image.asset('assets/ide/pyvis.png',
+                        width: 18, height: 18),
+                  ),
                 ),
-              ),
-            if (wide)
-              _menuButton(_toggleMenu, expanded: _menuExpanded)
-            else
-              MenuAnchor(
-                menuChildren: [
-                  for (final entry in widget.menus.entries)
-                    SubmenuButton(
-                      menuChildren: entry.value,
-                      child: Text(entry.key),
-                    ),
-                ],
-                builder: (context, controller, child) => _menuButton(
-                  () => controller.isOpen
-                      ? controller.close()
-                      : controller.open(),
-                  expanded: controller.isOpen,
+              if (wide)
+                _menuButton(_toggleMenu, expanded: _menuExpanded)
+              else
+                MenuAnchor(
+                  menuChildren: [
+                    for (final entry in widget.menus.entries)
+                      SubmenuButton(
+                        menuChildren: entry.value,
+                        child: Text(entry.key),
+                      ),
+                  ],
+                  builder: (context, controller, child) => _menuButton(
+                    () => controller.isOpen
+                        ? controller.close()
+                        : controller.open(),
+                    expanded: controller.isOpen,
+                  ),
                 ),
+              if (wide && _menuExpanded) _menuBar(),
+              Expanded(
+                child: wide && _menuExpanded
+                    ? const SizedBox.shrink()
+                    : Text(
+                        widget.workspaceTitle,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
               ),
-            if (wide && _menuExpanded) _menuBar(),
-            Expanded(
-              child: wide && _menuExpanded
-                  ? const SizedBox.shrink()
-                  : Text(
-                      widget.workspaceTitle,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-            ),
-            _button(Icons.remove, '最小化', 'minimize'),
-            _button(
-              _maximized ? Icons.filter_none : Icons.crop_square,
-              _maximized ? '还原' : '最大化',
-              'toggleMaximize',
-              hovered: _maximizeHovered,
-            ),
-            _button(Icons.close, '关闭窗口', 'close', close: true),
-          ]);
-        }),
+              _button(Icons.remove, '最小化', 'minimize'),
+              _button(
+                _maximized ? Icons.filter_none : Icons.crop_square,
+                _maximized ? '还原' : '最大化',
+                'toggleMaximize',
+                hovered: _maximizeHovered,
+              ),
+              _button(Icons.close, '关闭窗口', 'close', close: true),
+            ]);
+          }),
+        ),
       ),
     );
   }
