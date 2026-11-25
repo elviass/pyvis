@@ -70,7 +70,7 @@
       <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" />
       <InstallUISequence>
-        <Show Dialog="PyvisOptionsDlg" Before="ProgressDlg" Condition="NOT Installed" />
+        <Show Dialog="PyvisOptionsDlg" Sequence="1250" Condition="NOT Installed" />
       </InstallUISequence>
     </UI>
     <UIRef Id="WixUI_Common" />

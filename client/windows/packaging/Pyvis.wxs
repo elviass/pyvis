@@ -6,10 +6,10 @@
                   Schedule="afterInstallInitialize"
                   DowngradeErrorMessage="!(loc.PyvisNewerVersion)" />
     <InstallUISequence>
-      <!-- The scope is selected in the wizard. Detect earlier installs once
-           the execute sequence has the selected installation context. -->
-      <FindRelatedProducts Suppress="yes" />
-      <MigrateFeatureStates Suppress="yes" />
+      <!-- The first dialog returns after the wizard has set ALLUSERS. -->
+      <FindRelatedProducts Sequence="1260" />
+      <LaunchConditions Sequence="1270" />
+      <MigrateFeatureStates Sequence="1280" />
     </InstallUISequence>
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="Pyvis.exe" SourceFile="!(bindpath.payload)\pyvis_editor.exe" />
