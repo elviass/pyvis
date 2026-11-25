@@ -3,7 +3,14 @@
   <Package Name="Pyvis" Manufacturer="Pyvis" Version="$(var.PackageVersion)" Language="2052" Codepage="936"
            UpgradeCode="2E404B15-0C22-44F4-8E62-609D079A784E" Scope="perUserOrMachine">
     <MajorUpgrade AllowSameVersionUpgrades="yes" IgnoreLanguage="yes"
+                  Schedule="afterInstallInitialize"
                   DowngradeErrorMessage="!(loc.PyvisNewerVersion)" />
+    <InstallUISequence>
+      <!-- The scope is selected in the wizard. Detect earlier installs once
+           the execute sequence has the selected installation context. -->
+      <FindRelatedProducts Suppress="yes" />
+      <MigrateFeatureStates Suppress="yes" />
+    </InstallUISequence>
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="Pyvis.exe" SourceFile="!(bindpath.payload)\pyvis_editor.exe" />
     <Property Id="ARPPRODUCTICON" Value="Pyvis.exe" />
