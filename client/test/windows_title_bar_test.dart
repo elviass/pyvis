@@ -43,6 +43,7 @@ void main() {
     ));
 
     expect(find.text('文件'), findsNothing);
+    expect(tester.getSize(find.byType(Image)), const Size(24, 24));
     final collapsedInsets = messages.last.arguments as List<Object?>;
     await tester.tap(find.byTooltip('展开主菜单'));
     await tester.pumpAndSettle();

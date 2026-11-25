@@ -64,7 +64,7 @@ class WindowsTitleBar extends StatefulWidget {
 }
 
 class _WindowsTitleBarState extends State<WindowsTitleBar> {
-  static const _channel = MethodChannel('pyvis/window');
+  static const _channel = OptionalMethodChannel('pyvis/window');
   // Match the native hit-test dimensions in win32_window.cpp.
   static const _height = 36.0;
   static const _buttonWidth = 46.0;
@@ -250,7 +250,7 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
                             width: _menuButtonWidth,
                             child: Center(
                               child: Image.asset('assets/ide/pyvis.png',
-                                  width: 18, height: 18),
+                                  width: 24, height: 24),
                             ),
                           ),
                         if (wide)
