@@ -50,10 +50,14 @@ class WindowsTitleBar extends StatefulWidget {
     super.key,
     required this.workspaceTitle,
     required this.menus,
+    this.workspace,
+    this.actions,
   });
 
   final String workspaceTitle;
   final Map<String, List<Widget>> menus;
+  final Widget Function(bool showModes)? workspace;
+  final Widget Function(double windowWidth)? actions;
 
   @override
   State<WindowsTitleBar> createState() => _WindowsTitleBarState();
@@ -66,9 +70,13 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
   static const _buttonWidth = 46.0;
   static const _menuButtonWidth = 36.0;
   static const _menuItemWidth = 48.0;
-  static const _wideMenuWidth = 500.0;
+  static const _menuHighlightWidth = 42.0;
+  static const _menuHighlightHeight = 28.0;
   final _firstMenu = MenuController();
   final _firstMenuKey = GlobalKey();
+  final _leadingKey = GlobalKey();
+  final _actionsKey = GlobalKey();
+  (int, int)? _reportedInsets;
   bool _menuExpanded = false;
   bool _maximized = false;
   bool _maximizeHovered = false;
@@ -129,7 +137,6 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
 
   void _toggleMenu() {
     setState(() => _menuExpanded = !_menuExpanded);
-    _channel.invokeMethod<void>('menuExpanded', _menuExpanded);
     if (_menuExpanded) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _menuExpanded && _firstMenuKey.currentContext != null) {
@@ -137,6 +144,18 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
         }
       });
     }
+  }
+
+  void _reportHitTestInsets() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final leading = _leadingKey.currentContext?.size?.width.ceil() ?? 0;
+      final actions = _actionsKey.currentContext?.size?.width.ceil() ?? 0;
+      final insets = (leading, actions);
+      if (_reportedInsets == insets) return;
+      _reportedInsets = insets;
+      _channel.invokeMethod<void>('titleBarInsets', [leading, actions]);
+    });
   }
 
   Widget _menuBar() => MenuBar(
@@ -147,22 +166,50 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
         ),
         children: [
           for (final entry in widget.menus.entries)
-            SubmenuButton(
-              key: entry.key == widget.menus.keys.first ? _firstMenuKey : null,
-              controller:
-                  entry.key == widget.menus.keys.first ? _firstMenu : null,
-              style: ButtonStyle(
-                padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-                minimumSize: const WidgetStatePropertyAll(Size.zero),
-                fixedSize: const WidgetStatePropertyAll(
-                  Size(_menuItemWidth, _height),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: (_menuItemWidth - _menuHighlightWidth) / 2,
+                vertical: (_height - _menuHighlightHeight) / 2,
+              ),
+              child: SubmenuButton(
+                key:
+                    entry.key == widget.menus.keys.first ? _firstMenuKey : null,
+                controller:
+                    entry.key == widget.menus.keys.first ? _firstMenu : null,
+                style: ButtonStyle(
+                  padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+                  minimumSize: const WidgetStatePropertyAll(Size.zero),
+                  fixedSize: const WidgetStatePropertyAll(
+                    Size(_menuHighlightWidth, _menuHighlightHeight),
+                  ),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: const WidgetStatePropertyAll(RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(6)))),
+                  overlayColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.pressed)) {
+                      return const Color(0x29ffffff);
+                    }
+                    if (states.contains(WidgetState.hovered) ||
+                        states.contains(WidgetState.focused)) {
+                      return const Color(0x1affffff);
+                    }
+                    return Colors.transparent;
+                  }),
+                  splashFactory: NoSplash.splashFactory,
+                  textStyle: WidgetStatePropertyAll(
+                    Theme.of(context).textTheme.labelMedium,
+                  ),
                 ),
-                textStyle: WidgetStatePropertyAll(
-                  Theme.of(context).textTheme.labelMedium,
+                menuChildren: entry.value,
+                child: SizedBox(
+                  width: _menuHighlightWidth,
+                  child: Text(
+                    entry.key,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                  ),
                 ),
               ),
-              menuChildren: entry.value,
-              child: Text(entry.key),
             ),
         ],
       );
@@ -186,44 +233,67 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
         child: SizedBox(
           height: _height,
           child: LayoutBuilder(builder: (context, constraints) {
-            final wide = constraints.maxWidth >= _wideMenuWidth;
+            final width = constraints.maxWidth;
+            final wide = width >= (widget.actions == null ? 500 : 760);
+            _reportHitTestInsets();
             return Row(children: [
-              if (constraints.maxWidth >= 240)
-                SizedBox(
-                  width: _menuButtonWidth,
-                  child: Center(
-                    child: Image.asset('assets/ide/pyvis.png',
-                        width: 18, height: 18),
-                  ),
-                ),
-              if (wide)
-                _menuButton(_toggleMenu, expanded: _menuExpanded)
-              else
-                MenuAnchor(
-                  menuChildren: [
-                    for (final entry in widget.menus.entries)
-                      SubmenuButton(
-                        menuChildren: entry.value,
-                        child: Text(entry.key),
-                      ),
-                  ],
-                  builder: (context, controller, child) => _menuButton(
-                    () => controller.isOpen
-                        ? controller.close()
-                        : controller.open(),
-                    expanded: controller.isOpen,
-                  ),
-                ),
-              if (wide && _menuExpanded) _menuBar(),
               Expanded(
-                child: wide && _menuExpanded
-                    ? const SizedBox.shrink()
-                    : Text(
-                        widget.workspaceTitle,
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
+                child: LayoutBuilder(builder: (context, leading) {
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      key: _leadingKey,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (width >= 240)
+                          SizedBox(
+                            width: _menuButtonWidth,
+                            child: Center(
+                              child: Image.asset('assets/ide/pyvis.png',
+                                  width: 18, height: 18),
+                            ),
+                          ),
+                        if (wide)
+                          _menuButton(_toggleMenu, expanded: _menuExpanded)
+                        else
+                          MenuAnchor(
+                            menuChildren: [
+                              for (final entry in widget.menus.entries)
+                                SubmenuButton(
+                                  menuChildren: entry.value,
+                                  child: Text(entry.key),
+                                ),
+                            ],
+                            builder: (context, controller, child) =>
+                                _menuButton(
+                              () => controller.isOpen
+                                  ? controller.close()
+                                  : controller.open(),
+                              expanded: controller.isOpen,
+                            ),
+                          ),
+                        if (wide && _menuExpanded) _menuBar(),
+                        if (!(wide && _menuExpanded) && leading.maxWidth >= 120)
+                          Flexible(
+                            child: widget.workspace
+                                    ?.call(leading.maxWidth >= 320) ??
+                                Text(
+                                  widget.workspaceTitle,
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  style:
+                                      Theme.of(context).textTheme.labelMedium,
+                                ),
+                          ),
+                      ],
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(width: 12),
+              KeyedSubtree(
+                key: _actionsKey,
+                child: widget.actions?.call(width) ?? const SizedBox.shrink(),
               ),
               _button(Icons.remove, '最小化', 'minimize'),
               _button(

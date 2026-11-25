@@ -51,6 +51,8 @@ const accent = PyvisColors.accent;
 const muted = PyvisColors.muted;
 const editorBg = PyvisColors.background;
 
+bool get _usesWindowsChrome => defaultTargetPlatform == TargetPlatform.windows;
+
 class PyvisApp extends StatelessWidget {
   final GraphCanvasBuilder? graphCanvasBuilder;
   final InlineCompletionModel? inlineModel;
@@ -68,7 +70,7 @@ class PyvisApp extends StatelessWidget {
         title: 'Pyvis · Python 学习编辑器',
         theme: pyvisTheme(),
         builder: (context, child) {
-          if (Platform.isWindows) return WindowsWindowFrame(child: child!);
+          if (_usesWindowsChrome) return WindowsWindowFrame(child: child!);
           if (Platform.isAndroid) {
             return ColoredBox(color: bg, child: SafeArea(child: child!));
           }
@@ -2017,7 +2019,7 @@ class _EditorPageState extends State<EditorPage> {
     return SizedBox(
         height: 30,
         child: LayoutBuilder(builder: (_, size) {
-          if (size.maxWidth < 600) {
+          if (size.maxWidth < (_usesWindowsChrome ? 960 : 600)) {
             return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 reverse: true,
@@ -2660,112 +2662,137 @@ class _EditorPageState extends State<EditorPage> {
       width: double.infinity,
       height: 42,
       child: Row(children: [
-        Expanded(
-            child: Row(children: [
-          SizedBox(width: macKeys ? 92 : 12),
+        SizedBox(width: macKeys ? 92 : 12),
+        Expanded(child: toolbarWorkspace(!narrow)),
+        toolbarActions(narrow),
+      ]));
+
+  Widget toolbarWorkspace(bool showModes, {bool inTitleBar = false}) => Row(
+        mainAxisSize: inTitleBar ? MainAxisSize.min : MainAxisSize.max,
+        children: [
           IconButton(
               tooltip: '返回欢迎页',
               onPressed: returnToWelcome,
+              style: inTitleBar
+                  ? IconButton.styleFrom(
+                      minimumSize: const Size(32, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: EdgeInsets.zero,
+                    )
+                  : null,
               icon: const Icon(Icons.home_outlined, size: 21)),
           Flexible(child: projectMenu()),
-          if (!narrow) ...[const SizedBox(width: 18), workspaceSelection()],
-        ])),
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          if (!narrow)
-            ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: Text(
-                    entry == currentFile ? '当前文件' : p.basename(entry ?? '当前文件'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14))),
-          PopupMenuButton<String>(
-              tooltip: '打开文件并设为运行入口',
-              padding: EdgeInsets.zero,
-              icon: ideIcon('chevronDown'),
-              onSelected: (path) async {
-                await openFile(File(path));
-                if (mounted && currentFile == path) {
-                  setState(() => entry = path);
-                }
-              },
-              itemBuilder: (_) => files
-                  .map((file) => IdeMenuItem(
-                      value: file.path,
-                      child: Text(p.relative(file.path, from: project))))
-                  .toList()),
-          ib('run', '直接运行', running || checkingRun ? null : () => run(false),
-              extent: 34, size: 20),
-          ib('debug', '演示运行', running || checkingRun ? null : () => run(true),
-              extent: 34, size: 20),
-          if (running) ib('stop', '停止运行', stopRun, extent: 34),
-          PopupMenuButton<String>(
-              tooltip: '更多操作',
-              padding: EdgeInsets.zero,
-              icon: ideIcon('more', size: 20),
-              onSelected: (v) {
-                if (v == 'welcome') returnToWelcome();
-                if (v == 'save') save();
-                if (v == 'saveAs') save(saveAs: true);
-                if (v == 'new') createFile();
-                if (v == 'open') openPythonFile();
-                if (v == 'project') pickProject();
-                if (v == 'export') exportTrace();
-                if (v == 'import') importTrace();
-                if (v == 'check') checkCode();
-                if (v == 'settings') openEditorSettings();
-                if (v == 'about') openAbout();
-              },
-              itemBuilder: (_) => [
-                    const IdeMenuItem(
-                        value: 'welcome',
-                        child: IdeMenuLabel('欢迎页', icon: 'module')),
-                    const IdeMenuItem(
-                        value: 'new',
-                        child: IdeMenuLabel('新建 Python 文件', icon: 'python')),
-                    const IdeMenuItem(
-                        value: 'open',
-                        child: IdeMenuLabel('打开 Python 文件…', icon: 'open')),
-                    const IdeMenuItem(
-                        value: 'project',
-                        child: IdeMenuLabel('打开项目…', icon: 'folder')),
-                    const PopupMenuDivider(height: 9),
-                    IdeMenuItem(
-                        value: 'save',
-                        child: IdeMenuLabel('保存',
-                            icon: 'save', shortcut: macKeys ? '⌘S' : 'Ctrl+S')),
-                    const IdeMenuItem(
-                        value: 'saveAs', child: IdeMenuLabel('另存为…')),
-                    const PopupMenuDivider(height: 9),
-                    const IdeMenuItem(
-                        value: 'check',
-                        child: IdeMenuLabel('检查代码', icon: 'problems')),
-                    const IdeMenuItem(
-                        value: 'export', child: IdeMenuLabel('保存执行记录')),
-                    const IdeMenuItem(
-                        value: 'import', child: IdeMenuLabel('打开执行记录')),
-                    const PopupMenuDivider(height: 9),
-                    IdeMenuItem(
-                        value: 'settings',
-                        child: IdeMenuLabel('设置…',
-                            icon: 'settings',
-                            shortcut: macKeys ? '⌘,' : 'Ctrl+Alt+S')),
-                    const IdeMenuItem(
-                        value: 'about', child: IdeMenuLabel('关于 Pyvis'))
-                  ]),
-          if (!narrow) ...[
-            const SizedBox(width: 18),
-            ib('open', '打开项目', pickProject, size: 20, extent: 40),
-            ib('search', '查找', () => showSearch(), size: 20, extent: 40),
-            settingsMenu(),
-            const SizedBox(width: 10),
-          ] else ...[
-            ib('terminal', '控制台', toggleConsole,
-                extent: 28, size: 18, selected: showConsole),
-            ib('open', '打开项目', pickProject, extent: 28, size: 20),
+          if (showModes) ...[
+            SizedBox(width: inTitleBar ? 8 : 18),
+            workspaceSelection(),
           ],
-        ]),
-      ]));
+        ],
+      );
+
+  Future<void> selectRunEntry(String path) async {
+    await openFile(File(path));
+    if (mounted && currentFile == path) setState(() => entry = path);
+  }
+
+  List<Widget> runToolbarButtons() => [
+        ib('run', '直接运行', running || checkingRun ? null : () => run(false),
+            extent: 34, size: 20),
+        ib('debug', '演示运行', running || checkingRun ? null : () => run(true),
+            extent: 34, size: 20),
+        if (running) ib('stop', '停止运行', stopRun, extent: 34),
+      ];
+
+  Widget toolbarActions(bool narrow, {bool inTitleBar = false}) {
+    Widget menuButton(Widget button) =>
+        inTitleBar ? SizedBox(width: 32, child: button) : button;
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (!narrow)
+        ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: inTitleBar ? 100 : 160),
+            child: Text(
+                entry == currentFile ? '当前文件' : p.basename(entry ?? '当前文件'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14))),
+      menuButton(PopupMenuButton<String>(
+          tooltip: '打开文件并设为运行入口',
+          padding: EdgeInsets.zero,
+          icon: ideIcon('chevronDown'),
+          onSelected: selectRunEntry,
+          itemBuilder: (_) => [
+                for (final file in files)
+                  IdeMenuItem(
+                      value: file.path,
+                      child: Text(p.relative(file.path, from: project))),
+              ])),
+      ...runToolbarButtons(),
+      menuButton(PopupMenuButton<String>(
+          tooltip: '更多操作',
+          padding: EdgeInsets.zero,
+          icon: ideIcon('more', size: 20),
+          onSelected: (v) {
+            if (v == 'welcome') returnToWelcome();
+            if (v == 'save') save();
+            if (v == 'saveAs') save(saveAs: true);
+            if (v == 'new') createFile();
+            if (v == 'open') openPythonFile();
+            if (v == 'project') pickProject();
+            if (v == 'export') exportTrace();
+            if (v == 'import') importTrace();
+            if (v == 'check') checkCode();
+            if (v == 'settings') openEditorSettings();
+            if (v == 'about') openAbout();
+          },
+          itemBuilder: (_) => [
+                const IdeMenuItem(
+                    value: 'welcome',
+                    child: IdeMenuLabel('欢迎页', icon: 'module')),
+                const IdeMenuItem(
+                    value: 'new',
+                    child: IdeMenuLabel('新建 Python 文件', icon: 'python')),
+                const IdeMenuItem(
+                    value: 'open',
+                    child: IdeMenuLabel('打开 Python 文件…', icon: 'open')),
+                const IdeMenuItem(
+                    value: 'project',
+                    child: IdeMenuLabel('打开项目…', icon: 'folder')),
+                const PopupMenuDivider(height: 9),
+                IdeMenuItem(
+                    value: 'save',
+                    child: IdeMenuLabel('保存',
+                        icon: 'save', shortcut: macKeys ? '⌘S' : 'Ctrl+S')),
+                const IdeMenuItem(value: 'saveAs', child: IdeMenuLabel('另存为…')),
+                const PopupMenuDivider(height: 9),
+                const IdeMenuItem(
+                    value: 'check',
+                    child: IdeMenuLabel('检查代码', icon: 'problems')),
+                const IdeMenuItem(
+                    value: 'export', child: IdeMenuLabel('保存执行记录')),
+                const IdeMenuItem(
+                    value: 'import', child: IdeMenuLabel('打开执行记录')),
+                const PopupMenuDivider(height: 9),
+                IdeMenuItem(
+                    value: 'settings',
+                    child: IdeMenuLabel('设置…',
+                        icon: 'settings',
+                        shortcut: macKeys ? '⌘,' : 'Ctrl+Alt+S')),
+                const IdeMenuItem(
+                    value: 'about', child: IdeMenuLabel('关于 Pyvis'))
+              ])),
+      if (!narrow) ...[
+        SizedBox(width: inTitleBar ? 4 : 18),
+        ib('open', '打开项目', pickProject, size: 20, extent: inTitleBar ? 32 : 40),
+        ib('search', '查找', showSearch, size: 20, extent: inTitleBar ? 32 : 40),
+        settingsMenu(),
+        SizedBox(width: inTitleBar ? 4 : 10),
+      ] else ...[
+        ib('terminal', '控制台', toggleConsole,
+            extent: 28, size: 18, selected: showConsole),
+        ib('open', '打开项目', pickProject, extent: 28, size: 20),
+      ],
+    ]);
+  }
 
   bool aboutOpen = false;
   Future<void> openAbout() async {
@@ -2780,69 +2807,69 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  List<Widget> editorSettingsMenuItems() => [
+        MenuItemButton(
+            leadingIcon: const SizedBox(width: 16),
+            onPressed: openLearningAi,
+            child: const Text('学习提问…')),
+        MenuItemButton(
+            leadingIcon: const SizedBox(width: 16),
+            onPressed: () => openEditorSettings(initialPage: 4),
+            child: const Text('模型 API 配置…')),
+        MenuItemButton(
+            leadingIcon: const SizedBox(width: 16),
+            onPressed: openEditorSettings,
+            trailingIcon: Text(macKeys ? '⌘,' : 'Ctrl+Alt+S',
+                style: const TextStyle(fontSize: 11, color: muted)),
+            child: const Text('设置…')),
+        const Divider(),
+        SubmenuButton(
+            leadingIcon: const SizedBox(width: 16),
+            menuChildren: [
+              MenuItemButton(
+                  leadingIcon: const SizedBox(width: 16),
+                  onPressed: () => openEditorSettings(initialPage: 0),
+                  child: const Text('字体…')),
+              SubmenuButton(
+                  leadingIcon: const SizedBox(width: 16),
+                  menuChildren: [
+                    MenuItemButton(
+                        leadingIcon: const SizedBox(width: 16),
+                        onPressed: () => openEditorSettings(initialPage: 1),
+                        child: const Text('软换行与代码缩略图…')),
+                    MenuItemButton(
+                        leadingIcon: const SizedBox(width: 16),
+                        onPressed: () => openEditorSettings(initialPage: 2),
+                        child: const Text('代码检查…')),
+                  ],
+                  child: const Text('常规')),
+              MenuItemButton(
+                  leadingIcon: const SizedBox(width: 16),
+                  onPressed: () => openEditorSettings(initialPage: 3),
+                  child: Text(Platform.isAndroid ? '触控操作…' : '键位…')),
+            ],
+            child: const Text('编辑器')),
+        SubmenuButton(
+            leadingIcon: const SizedBox(width: 16),
+            menuChildren: [
+              MenuItemButton(
+                  onPressed: () => setState(() => showProject = !showProject),
+                  leadingIcon: Icon(showProject ? Icons.check : null, size: 14),
+                  child: const Text('项目')),
+              MenuItemButton(
+                  onPressed: toggleConsole,
+                  leadingIcon: Icon(showConsole ? Icons.check : null, size: 14),
+                  child: const Text('控制台')),
+              MenuItemButton(
+                  leadingIcon: const SizedBox(width: 16),
+                  onPressed: () => setState(openProblems),
+                  child: const Text('问题')),
+            ],
+            child: const Text('工具窗口')),
+      ];
+
   Widget settingsMenu() => MenuAnchor(
-        menuChildren: [
-          MenuItemButton(
-              leadingIcon: const SizedBox(width: 16),
-              onPressed: openLearningAi,
-              child: const Text('学习提问…')),
-          MenuItemButton(
-              leadingIcon: const SizedBox(width: 16),
-              onPressed: () => openEditorSettings(initialPage: 4),
-              child: const Text('模型 API 配置…')),
-          MenuItemButton(
-              leadingIcon: const SizedBox(width: 16),
-              onPressed: openEditorSettings,
-              trailingIcon: Text(macKeys ? '⌘,' : 'Ctrl+Alt+S',
-                  style: const TextStyle(fontSize: 11, color: muted)),
-              child: const Text('设置…')),
-          const Divider(),
-          SubmenuButton(
-              leadingIcon: const SizedBox(width: 16),
-              menuChildren: [
-                MenuItemButton(
-                    leadingIcon: const SizedBox(width: 16),
-                    onPressed: () => openEditorSettings(initialPage: 0),
-                    child: const Text('字体…')),
-                SubmenuButton(
-                    leadingIcon: const SizedBox(width: 16),
-                    menuChildren: [
-                      MenuItemButton(
-                          leadingIcon: const SizedBox(width: 16),
-                          onPressed: () => openEditorSettings(initialPage: 1),
-                          child: const Text('软换行与代码缩略图…')),
-                      MenuItemButton(
-                          leadingIcon: const SizedBox(width: 16),
-                          onPressed: () => openEditorSettings(initialPage: 2),
-                          child: const Text('代码检查…')),
-                    ],
-                    child: const Text('常规')),
-                MenuItemButton(
-                    leadingIcon: const SizedBox(width: 16),
-                    onPressed: () => openEditorSettings(initialPage: 3),
-                    child: Text(Platform.isAndroid ? '触控操作…' : '键位…')),
-              ],
-              child: const Text('编辑器')),
-          SubmenuButton(
-              leadingIcon: const SizedBox(width: 16),
-              menuChildren: [
-                MenuItemButton(
-                    onPressed: () => setState(() => showProject = !showProject),
-                    leadingIcon:
-                        Icon(showProject ? Icons.check : null, size: 14),
-                    child: const Text('项目')),
-                MenuItemButton(
-                    onPressed: toggleConsole,
-                    leadingIcon:
-                        Icon(showConsole ? Icons.check : null, size: 14),
-                    child: const Text('控制台')),
-                MenuItemButton(
-                    leadingIcon: const SizedBox(width: 16),
-                    onPressed: () => setState(openProblems),
-                    child: const Text('问题')),
-              ],
-              child: const Text('工具窗口')),
-        ],
+        menuChildren: editorSettingsMenuItems(),
         builder: (context, controller, child) => ib('settings', '设置',
             () => controller.isOpen ? controller.close() : controller.open(),
             size: 20, extent: 40),
@@ -2999,102 +3026,117 @@ class _EditorPageState extends State<EditorPage> {
 
   void showSearch() => finder.findMode();
 
-  Widget windowsTitleBar() => ListenableBuilder(
-    listenable: editor,
-    builder: (context, _) {
-      Widget item(String label, VoidCallback? action, {String? shortcut}) =>
-          MenuItemButton(
-            onPressed: action,
-            child: IdeMenuLabel(label, shortcut: shortcut),
-          );
-      final canEdit = !welcome && editorWritable && !editor.isComposing;
-      final canRun = !welcome && !running && !checkingRun && entry != null;
-      void changeHistory(VoidCallback action) {
-        editorContextMenu.hide(context);
-        completionPopup.dismiss();
-        decorations.dismissInline();
-        action();
-      }
+  Widget windowsTitleBar() {
+    Widget item(String label, VoidCallback? action, {String? shortcut}) =>
+        MenuItemButton(
+          onPressed: action,
+          child: IdeMenuLabel(label, shortcut: shortcut),
+        );
+    final canEdit = !welcome && editorWritable && !editor.isComposing;
+    final canRun = !welcome && !running && !checkingRun && entry != null;
+    void changeHistory(VoidCallback action) {
+      editorContextMenu.hide(context);
+      completionPopup.dismiss();
+      decorations.dismissInline();
+      action();
+    }
 
-      return WindowsTitleBar(
-        workspaceTitle: welcome
-            ? 'Pyvis · 欢迎页'
-            : project == null
-            ? 'Pyvis'
-            : p.basename(project!),
-        menus: {
-          '文件': [
-            item('新建项目…', createProject),
-            item('新建 Python 文件…', welcome ? welcomeScript : createFile),
-            item('打开项目…', pickProject),
-            item('打开 Python 文件…', openPythonFile, shortcut: 'Ctrl+O'),
-            const Divider(),
-            item('全部保存', welcome ? null : saveAllDocuments, shortcut: 'Ctrl+S'),
-            item(
-              '另存为…',
-              welcome ? null : () => save(saveAs: true),
-              shortcut: 'Ctrl+Shift+S',
+    return WindowsTitleBar(
+      workspaceTitle: welcome ? 'Pyvis · 欢迎页' : 'Pyvis',
+      workspace: welcome
+          ? null
+          : (showModes) => toolbarWorkspace(showModes, inTitleBar: true),
+      actions: welcome
+          ? null
+          : (width) => switch (width) {
+                >= 640 => toolbarActions(width < 900, inTitleBar: true),
+                >= 400 => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: runToolbarButtons(),
+                  ),
+                _ => const SizedBox.shrink(),
+              },
+      menus: {
+        '文件': [
+          item('新建项目…', createProject),
+          item('新建 Python 文件…', welcome ? welcomeScript : createFile),
+          item('打开项目…', pickProject),
+          item('打开 Python 文件…', openPythonFile, shortcut: 'Ctrl+O'),
+          const Divider(),
+          item('全部保存', welcome ? null : saveAllDocuments, shortcut: 'Ctrl+S'),
+          item(
+            '另存为…',
+            welcome ? null : () => save(saveAs: true),
+            shortcut: 'Ctrl+Shift+S',
+          ),
+        ],
+        '编辑': [
+          item(
+            '撤回',
+            canEdit && editor.canUndo ? () => changeHistory(editor.undo) : null,
+          ),
+          item(
+            '恢复',
+            canEdit && editor.canRedo ? () => changeHistory(editor.redo) : null,
+          ),
+          const Divider(),
+          item('查找', welcome ? null : showSearch, shortcut: 'Ctrl+F'),
+          item('替换', welcome ? null : finder.replaceMode, shortcut: 'Ctrl+R'),
+        ],
+        '视图': [
+          item('返回欢迎页', welcome ? null : returnToWelcome),
+          item(
+            '编辑代码',
+            welcome ? null : () => setState(() => switchWorkspace(false)),
+          ),
+          item(
+            '代码流程图',
+            welcome ? null : () => setState(() => switchWorkspace(true)),
+          ),
+          const Divider(),
+          item(
+            '项目面板',
+            welcome ? null : () => setState(() => showProject = !showProject),
+          ),
+          item('控制台', welcome ? null : toggleConsole),
+        ],
+        '运行': [
+          item(
+            '直接运行',
+            canRun ? () => run(false) : null,
+            shortcut: 'Shift+F10',
+          ),
+          item('演示运行', canRun ? () => run(true) : null, shortcut: 'Shift+F9'),
+          item('停止运行', running ? stopRun : null),
+          if (!welcome && files.isNotEmpty)
+            SubmenuButton(
+              menuChildren: [
+                for (final file in files)
+                  item(p.relative(file.path, from: project),
+                      () => selectRunEntry(file.path)),
+              ],
+              child: const Text('打开文件并设为运行入口'),
             ),
-          ],
-          '编辑': [
-            item(
-              '撤回',
-              canEdit && editor.canUndo
-                  ? () => changeHistory(editor.undo)
-                  : null,
-            ),
-            item(
-              '恢复',
-              canEdit && editor.canRedo
-                  ? () => changeHistory(editor.redo)
-                  : null,
-            ),
-            const Divider(),
-            item('查找', welcome ? null : showSearch, shortcut: 'Ctrl+F'),
-            item('替换', welcome ? null : finder.replaceMode, shortcut: 'Ctrl+R'),
-          ],
-          '视图': [
-            item('返回欢迎页', welcome ? null : returnToWelcome),
-            item(
-              '编辑代码',
-              welcome ? null : () => setState(() => switchWorkspace(false)),
-            ),
-            item(
-              '代码流程图',
-              welcome ? null : () => setState(() => switchWorkspace(true)),
-            ),
-            const Divider(),
-            item(
-              '项目面板',
-              welcome ? null : () => setState(() => showProject = !showProject),
-            ),
-            item('控制台', welcome ? null : toggleConsole),
-          ],
-          '运行': [
-            item(
-              '直接运行',
-              canRun ? () => run(false) : null,
-              shortcut: 'Shift+F10',
-            ),
-            item('演示运行', canRun ? () => run(true) : null, shortcut: 'Shift+F9'),
-            item('停止运行', running ? stopRun : null),
-            item('检查代码', welcome ? null : checkCode, shortcut: 'Ctrl+F7'),
-            const Divider(),
-            item('打开执行记录', running || checkingRun ? null : importTrace),
-            item(
-              '保存执行记录',
-              events.isNotEmpty || console.isNotEmpty ? exportTrace : null,
-            ),
-          ],
-          '帮助': [
-            item('设置…', openEditorSettings),
-            item('键盘映射…', () => openEditorSettings(initialPage: 3)),
-            item('关于 Pyvis', openAbout),
-          ],
-        },
-      );
-    },
-  );
+          item('检查代码', welcome ? null : checkCode, shortcut: 'Ctrl+F7'),
+          const Divider(),
+          item('打开执行记录', running || checkingRun ? null : importTrace),
+          item(
+            '保存执行记录',
+            events.isNotEmpty || console.isNotEmpty ? exportTrace : null,
+          ),
+        ],
+        '帮助': [
+          item('设置…', openEditorSettings),
+          SubmenuButton(
+            menuChildren: editorSettingsMenuItems(),
+            child: const Text('编辑器与工具设置'),
+          ),
+          item('键盘映射…', () => openEditorSettings(initialPage: 3)),
+          item('关于 Pyvis', openAbout),
+        ],
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3135,15 +3177,16 @@ class _EditorPageState extends State<EditorPage> {
         child: Scaffold(
             backgroundColor: panel,
             body: Column(children: [
-              if (Platform.isWindows) windowsTitleBar(),
-              if (!welcome)
+              if (_usesWindowsChrome) windowsTitleBar(),
+              if (!welcome && !_usesWindowsChrome)
                 mainToolbar(narrow)
-              else if (!Platform.isWindows)
+              else if (welcome && !_usesWindowsChrome)
                 SizedBox(
                     height: 42,
                     child: Row(children: [
                       SizedBox(width: macKeys ? 92 : 14),
-                      Image.asset('assets/ide/pyvis.png', width: 22, height: 22),
+                      Image.asset('assets/ide/pyvis.png',
+                          width: 22, height: 22),
                       const SizedBox(width: 8),
                       const Text('欢迎页'),
                       const Spacer(),
@@ -3160,7 +3203,7 @@ class _EditorPageState extends State<EditorPage> {
                       Expanded(
                           child: narrow
                               ? Column(children: [
-                                  workspaceSelection(),
+                                  if (!_usesWindowsChrome) workspaceSelection(),
                                   Expanded(child: workspace()),
                                 ])
                               : Row(

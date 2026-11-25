@@ -40,10 +40,14 @@ bool FlutterWindow::OnCreate() {
       ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE);
     } else if (command == "close") {
       PostMessage(window, WM_CLOSE, 0, 0);
-    } else if (command == "menuExpanded") {
-      const auto* expanded = std::get_if<bool>(call.arguments());
-      if (expanded) {
-        SetTitleBarMenuExpanded(*expanded);
+    } else if (command == "titleBarInsets") {
+      const auto* insets = std::get_if<flutter::EncodableList>(call.arguments());
+      if (insets && insets->size() == 2) {
+        const auto* leading = std::get_if<int32_t>(&insets->at(0));
+        const auto* actions = std::get_if<int32_t>(&insets->at(1));
+        if (leading && actions && *leading > 0 && *actions >= 0) {
+          SetTitleBarInsets(*leading, *actions);
+        }
       }
     } else {
       result->NotImplemented();

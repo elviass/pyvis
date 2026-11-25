@@ -28,11 +28,17 @@ constexpr DWORD kWindowStyle =
 constexpr int kTitleBarHeight = 36;
 constexpr int kCaptionButtonWidth = 46;
 constexpr int kWindowCornerRadius = 9;
-constexpr wchar_t kExpandedMenuProperty[] = L"PyvisExpandedTitleBarMenu";
+constexpr wchar_t kTitleBarLeadingProperty[] = L"PyvisTitleBarLeading";
+constexpr wchar_t kTitleBarActionsProperty[] = L"PyvisTitleBarActions";
 constexpr UINT_PTR kChildFrameSubclass = 1;
 // DWMWA_BORDER_COLOR is available at runtime on Windows 11.
 constexpr DWORD kBorderColorAttribute = 34;
 constexpr DWORD kNoBorderColor = 0xFFFFFFFE;
+
+void HideSystemBorder(HWND window) {
+  DwmSetWindowAttribute(window, kBorderColorAttribute, &kNoBorderColor,
+                        sizeof(kNoBorderColor));
+}
 
 LRESULT HitTestFrame(HWND window, LPARAM position) {
   const UINT dpi = GetDpiForWindow(window);
@@ -58,21 +64,19 @@ LRESULT HitTestFrame(HWND window, LPARAM position) {
   }
 
   if (point.y < MulDiv(kTitleBarHeight, dpi, 96)) {
-    int menu_width = client.right < MulDiv(240, dpi, 96) ? 36 : 72;
-    if (client.right >= MulDiv(500, dpi, 96) &&
-        GetProp(window, kExpandedMenuProperty)) {
-      menu_width += 5 * 48;  // Match the five categories in the Flutter menu.
-    }
-    if (point.x < MulDiv(menu_width, dpi, 96)) {
-      return HTCLIENT;
-    }
+    const auto leading = reinterpret_cast<INT_PTR>(
+        GetProp(window, kTitleBarLeadingProperty));
+    const auto actions = reinterpret_cast<INT_PTR>(
+        GetProp(window, kTitleBarActionsProperty));
     const int from_right = client.right - point.x;
-    if (from_right > MulDiv(3 * kCaptionButtonWidth, dpi, 96)) {
-      return HTCAPTION;
-    }
     if (from_right > MulDiv(kCaptionButtonWidth, dpi, 96) &&
         from_right <= MulDiv(2 * kCaptionButtonWidth, dpi, 96)) {
       return HTMAXBUTTON;
+    }
+    if (point.x >= MulDiv(leading > 0 ? static_cast<int>(leading) : 72, dpi, 96) &&
+        from_right > MulDiv(3 * kCaptionButtonWidth + static_cast<int>(actions),
+                            dpi, 96)) {
+      return HTCAPTION;
     }
   }
   return HTCLIENT;
@@ -218,8 +222,7 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
-  DwmSetWindowAttribute(window, kBorderColorAttribute, &kNoBorderColor,
-                        sizeof(kNoBorderColor));
+  HideSystemBorder(window);
   SetWindowPos(window, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                    SWP_FRAMECHANGED);
@@ -275,6 +278,17 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_NCHITTEST:
       return HitTestFrame(hwnd, lparam);
 
+    case WM_NCACTIVATE:
+      // Keep the activation state but skip native painting over Flutter's frame.
+      if (!IsIconic(hwnd)) {
+        return DefWindowProc(hwnd, message, wparam, -1);
+      }
+      break;
+
+    case WM_NCPAINT:
+      if (!IsIconic(hwnd)) return 0;
+      break;
+
     case WM_GETMINMAXINFO: {
       DefWindowProc(hwnd, message, wparam, lparam);
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -320,7 +334,8 @@ Win32Window::MessageHandler(HWND hwnd,
       break;
 
     case WM_NCDESTROY:
-      RemoveProp(hwnd, kExpandedMenuProperty);
+      RemoveProp(hwnd, kTitleBarLeadingProperty);
+      RemoveProp(hwnd, kTitleBarActionsProperty);
       break;
 
     case WM_DESTROY:
@@ -354,13 +369,19 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      if (LOWORD(wparam) != WA_INACTIVE && !HIWORD(wparam) &&
+          child_content_ != nullptr) {
         SetFocus(child_content_);
       }
       return 0;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
+      HideSystemBorder(hwnd);
+      return 0;
+
+    case WM_DWMCOMPOSITIONCHANGED:
+      HideSystemBorder(hwnd);
       return 0;
   }
 
@@ -406,12 +427,14 @@ HWND Win32Window::GetHandle() {
   return window_handle_;
 }
 
-void Win32Window::SetTitleBarMenuExpanded(bool expanded) {
-  if (expanded) {
-    SetProp(window_handle_, kExpandedMenuProperty,
-            reinterpret_cast<HANDLE>(static_cast<INT_PTR>(1)));
+void Win32Window::SetTitleBarInsets(int leading, int actions) {
+  SetProp(window_handle_, kTitleBarLeadingProperty,
+          reinterpret_cast<HANDLE>(static_cast<INT_PTR>(leading)));
+  if (actions > 0) {
+    SetProp(window_handle_, kTitleBarActionsProperty,
+            reinterpret_cast<HANDLE>(static_cast<INT_PTR>(actions)));
   } else {
-    RemoveProp(window_handle_, kExpandedMenuProperty);
+    RemoveProp(window_handle_, kTitleBarActionsProperty);
   }
 }
 

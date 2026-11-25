@@ -1,7 +1,7 @@
 name: pyvis_editor
 description: Python 图形化学习编辑器
 publish_to: none
-version: 0.1.1+4
+version: 0.1.1+5
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:

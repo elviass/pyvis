@@ -56,7 +56,7 @@ class Win32Window {
   RECT GetClientArea();
 
  protected:
-  void SetTitleBarMenuExpanded(bool expanded);
+  void SetTitleBarInsets(int leading, int actions);
 
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that
