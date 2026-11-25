@@ -49,6 +49,10 @@ jobs:
           $portable = Join-Path $env:RUNNER_TEMP pyvis-portable
           Expand-Archive $zip.FullName $portable
           Confirm-PyvisPayload $portable
+          $payloadHashes = @{}
+          foreach ($file in @('pyvis_editor.exe', 'data/app.so')) {
+            $payloadHashes[$file] = (Get-FileHash -LiteralPath "$portable/$file").Hash
+          }
           $msi = Get-Item "$packages/*.msi"
           Add-Type @'
           using System;
@@ -85,6 +89,11 @@ jobs:
             $desktopLink = Join-Path ([Environment]::GetFolderPath($Desktop)) 'Pyvis.lnk'
             try {
               Confirm-PyvisPayload $App
+              foreach ($file in $payloadHashes.Keys) {
+                if ((Get-FileHash -LiteralPath "$App/$file").Hash -ne $payloadHashes[$file]) {
+                  throw "The MSI installed a different build of $file."
+                }
+              }
               Confirm-ShortcutIcon $startLink $exe
               if ($CreateDesktop) {
                 Confirm-ShortcutIcon $desktopLink $exe -Desktop
