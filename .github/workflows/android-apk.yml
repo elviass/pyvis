@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply release version from tag
+        if: github.ref_type == 'tag'
+        run: python3 tools/apply_release_version.py "$GITHUB_REF_NAME"
 
       - uses: actions/setup-java@v4
         with:
