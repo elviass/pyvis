@@ -49,6 +49,7 @@ flutter build apk --release --target-platform android-arm64,android-x64
 ```
 
 产物位于 `client/build/app/outputs/flutter-apk/app-release.apk`。
+本地构建默认使用 Android 调试签名。正式分发请运行 GitHub Actions 的 `Android signed APK` 工作流，并从 `Pyvis-Android` 构建产物下载已验证签名的 APK。已有调试签名版本的设备需要先备份文稿，再卸载旧版才能安装正式签名版本。
 
 **macOS**（Xcode）
 
@@ -65,6 +66,8 @@ flutter build macos --release
 构建 MSI 需安装 WiX 6.0.2，并运行 `wix extension add -g WixToolset.UI.wixext/6.0.2`。在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，默认生成 MSI 和便携 ZIP。可用 `-Format MSI` 或 `-Format Portable` 只构建其中一种。两种包均内置 CPython，产物位于 `client/build/windows/packages/`。MSI 安装向导可选择为当前用户或所有用户安装、修改安装目录，以及是否创建桌面快捷方式。两种范围均添加开始菜单入口，为所有用户安装需要管理员权限。重新安装旧版 0.1.1 MSI 时，选择与原安装相同的范围可就地更新。GitHub Actions 的 `Pyvis-Windows-x64` 构建产物也提供两个文件。[Windows 打包脚本](tools/build_windows.ps1)
 
 ## 开发资料
+
+Windows 的 Actions 产物 `Pyvis-Windows-x64` 包含自签测试 MSI、公开证书 `windows-test.cer` 和便携 ZIP。测试者确认来源及证书指纹后，可以在 Windows 证书管理器信任该测试证书。便携 ZIP 和公开证书都不包含私钥。
 
 - [Flutter 客户端](client/)包含编辑器、节点画布和平台工程。[Python 内核](runtime/pyvis_runtime/)负责执行记录和代码分析。
 - [Flutter 测试](client/test/)和[内核与画布测试](tests/)覆盖基础工作流。测试截图输出到 `client/build/test-artifacts/`。

@@ -4,6 +4,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val releaseSigning = listOf(
+    "ANDROID_KEYSTORE_PATH",
+    "ANDROID_STORE_PASSWORD",
+    "ANDROID_KEY_ALIAS",
+    "ANDROID_KEY_PASSWORD",
+).associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotBlank) }
+val hasReleaseSigning = releaseSigning.values.any { it != null }
+if (hasReleaseSigning) {
+    val missing = releaseSigning.filterValues { it == null }.keys
+    require(missing.isEmpty()) { "Missing Android release signing settings: ${missing.joinToString()}" }
+}
+
 android {
     namespace = "dev.pyvis.pyvis_editor"
     compileSdk = flutter.compileSdkVersion
@@ -29,11 +41,19 @@ android {
         versionName = flutter.versionName
     }
 
+    if (hasReleaseSigning) {
+        signingConfigs.create("production") {
+            storeFile = file(releaseSigning.getValue("ANDROID_KEYSTORE_PATH")!!)
+            storePassword = releaseSigning.getValue("ANDROID_STORE_PASSWORD")
+            keyAlias = releaseSigning.getValue("ANDROID_KEY_ALIAS")
+            keyPassword = releaseSigning.getValue("ANDROID_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Keep local release-mode development available without publishing credentials.
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "production" else "debug")
         }
     }
 }
