@@ -15,6 +15,7 @@ class LoopbackHttp extends HttpOverrides {}
 class ControlledModel extends InlineCompletionModel {
   final requests =
       <({String prefix, String suffix, Completer<String?> reply})>[];
+  bool get isObserved => hasListeners;
   @override
   bool get available => true;
   @override
@@ -40,6 +41,7 @@ void main() {
       'local FIM results remain previews, reject stale input and undo once',
       (tester) async {
     final model = ControlledModel();
+    addTearDown(model.dispose);
     await openFixture(tester, {'main.py': 'scores = [1, 2]\nfor'},
         app: PyvisApp(aiEnabled: true, inlineModel: model));
     final code = tester.widget<CodeEditor>(find.byType(CodeEditor));
@@ -79,12 +81,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(editor.text, 'scores = [1, 2]\nfor index in ');
     expect(tester.takeException(), isNull);
+    expect(model.isObserved, isTrue);
     await tester.pumpWidget(const SizedBox());
+    expect(model.isObserved, isFalse);
+    void ownerListener() {}
+
+    model.addListener(ownerListener);
+    expect(model.isObserved, isTrue);
+    model.removeListener(ownerListener);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('shows a validated streamed block before inference finishes',
       (tester) async {
     final model = StreamingModel();
+    addTearDown(model.dispose);
     await openFixture(tester, {'main.py': 'items = [1, 2]\nfor item'},
         app: PyvisApp(aiEnabled: true, inlineModel: model));
     final code = tester.widget<CodeEditor>(find.byType(CodeEditor));

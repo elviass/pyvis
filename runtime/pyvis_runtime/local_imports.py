@@ -2,6 +2,19 @@
 import ast
 
 
+def is_project_source(path, root):
+    """Apply the project source boundary before reading a module."""
+    try:
+        paths = (path.relative_to(root), path.resolve().relative_to(root))
+        return path.suffix == '.py' and all(
+            all(not part.startswith('.') and part not in ('venv', 'node_modules', '__pycache__')
+                for part in relative.parts)
+            for relative in paths
+        ) and path.is_file()
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 def import_candidates(tree, filename, root, suffixes=('.py',)):
     def candidates(base, module):
         parts = module.split('.') if module else []

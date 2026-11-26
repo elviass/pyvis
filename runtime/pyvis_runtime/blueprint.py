@@ -629,6 +629,8 @@ def main():
         request_id = None
         try:
             request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError('请求必须是 JSON 对象')
             request_id = request.get('id')
             source = request['source']
             if not isinstance(source, str) or len(source) > 150_000:

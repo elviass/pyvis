@@ -283,12 +283,12 @@ def analyze(source, filename, project=None, inspections=True, buffers=None, dict
                 inspection_failures=failures, brackets=bracket_pairs(source, tokens), engines=['CPython', 'Jedi'] + ([] if sys.platform == 'android' else ['Ruff', 'ty']))
 
 
-def check_sources(sources, entry=None, project=None, source_errors=None):
+def check_sources(sources, entry=None, project=None, source_errors=None, *, discover_imports=False):
     sources = {str(Path(name)): source for name, source in sources.items()}
     source_errors = {str(Path(name)): error for name, error in (source_errors or {}).items()}
     pending = deque([*sources, *source_errors] if entry is None else [str(Path(entry))])
     root = Path(project) if project else Path(entry or '.').parent
-    visited, diagnostics = set(), []
+    visited, diagnostics, dependencies = set(), [], {}
     while pending:
         filename = pending.popleft()
         if filename in visited: continue
@@ -305,19 +305,27 @@ def check_sources(sources, entry=None, project=None, source_errors=None):
         if any(d['severity'] == 'error' for d in errors): continue
         tree = ast.parse(source)
         diagnostics.extend(unknown_names(source, filename, tree))
-        if entry is None: continue
+        if entry is None and not discover_imports: continue
         for candidate in import_candidates(tree, Path(filename), root):
             name = str(candidate)
-            if name not in visited and (name in sources or name in source_errors):
+            if discover_imports:
+                dependencies[name] = None
+            elif name not in visited and (name in sources or name in source_errors):
                 pending.append(name)
-    return dict(diagnostics=diagnostics, checked=sorted(visited))
+    result = dict(diagnostics=diagnostics, checked=sorted(visited))
+    if discover_imports:
+        result['dependencies'] = list(dependencies)
+    return result
 
 
 def main():
     for line in sys.stdin:
-        request = {}
+        request_id = None
         try:
             request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError('请求必须是 JSON 对象')
+            request_id = request.get('id')
             if request.get('action') == 'format':
                 from .editor_tools import format_source
                 result = dict(source=format_source(request['source'], request['filename'], request.get('imports', False), request.get('selection')))
@@ -338,6 +346,9 @@ def main():
                 result = validate_inline(request['source'], request['line'], request['column'], request['prediction'])
             elif request.get('action') == 'check':
                 result = check_sources(request['sources'], request.get('entry'), request.get('project'), request.get('source_errors'))
+            elif request.get('action') == 'check_project':
+                result = check_sources(request['sources'], project=request['project'],
+                                       source_errors=request.get('source_errors'), discover_imports=True)
             elif request.get('action') == 'decode_source':
                 from .source_encoding import decode_source
                 source, encoding = decode_source(base64.b64decode(request['data']))
@@ -351,10 +362,10 @@ def main():
                 result = dict(data=base64.b64encode(data).decode('ascii'))
             else:
                 result = analyze(request.get('source', ''), request.get('filename', '<editor>'), request.get('project'), buffers=request.get('buffers'), dictionary=request.get('dictionary', ()))
-            result['id'] = request.get('id')
+            result['id'] = request_id
             print(json.dumps(result, ensure_ascii=False), flush=True)
         except Exception as exc:
-            print(json.dumps({'id': request.get('id'), 'error': f'{type(exc).__name__}: {exc}'}, ensure_ascii=False), flush=True)
+            print(json.dumps({'id': request_id, 'error': f'{type(exc).__name__}: {exc}'}, ensure_ascii=False), flush=True)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:pyvis_editor/editor_settings.dart';
 import 'package:pyvis_editor/learning_ai.dart';
 import 'package:pyvis_editor/learning_ai_view.dart';
 import 'package:pyvis_editor/main.dart';
@@ -39,17 +40,78 @@ class _StreamingStore extends _CatalogStore {
 class _PendingAnswer extends AiRequest {
   final done = Completer<String>();
   late void Function(String) emit;
+  Map<String, String>? attachedContext;
 
   @override
   Future<String> send(
       AiConfig config, String question, Map<String, String> attachments,
       {void Function(String)? onText}) {
     emit = onText!;
+    attachedContext = attachments;
     return done.future;
   }
 }
 
 void main() {
+  testWidgets('context confirmation preserves the selected attachment content',
+      (tester) async {
+    const step = '{"frames":[{"locals":{"x":7}}],"heap":{"o1":[]}}';
+    const error = '{"traceback":"example.py:8"}';
+    final request = _PendingAnswer();
+    var savedPreference = EditorPreferences();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: LearningAiPanel(
+          available: const {'当前演示步骤': step, '当前错误': error},
+          messages: [],
+          store: _StreamingStore(),
+          createRequest: () => request,
+          onHideContextWarning: () async {
+            savedPreference.warnBeforeSharingAiContext = false;
+          },
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final stepChip = find.widgetWithText(FilterChip, '当前演示步骤');
+    final errorChip = find.widgetWithText(FilterChip, '当前错误');
+    final hideWarning = find.widgetWithText(CheckboxListTile, '不再显示此提示');
+
+    await tester.tap(stepChip);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('运行时变量值'), findsOneWidget);
+    expect(tester.widget<FilterChip>(stepChip).selected, isFalse);
+    await tester.tap(hideWarning);
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilterChip>(stepChip).selected, isFalse);
+    expect(savedPreference.warnBeforeSharingAiContext, isTrue);
+    expect(request.attachedContext, isNull);
+
+    await tester.tap(stepChip);
+    await tester.pumpAndSettle();
+    expect(tester.widget<CheckboxListTile>(hideWarning).value, isFalse);
+    await tester.tap(hideWarning);
+    await tester.tap(find.widgetWithText(FilledButton, '确认勾选'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilterChip>(stepChip).selected, isTrue);
+    savedPreference = EditorPreferences.fromJson(savedPreference.toJson());
+    expect(savedPreference.warnBeforeSharingAiContext, isFalse);
+    expect(EditorPreferences.fromJson({}).warnBeforeSharingAiContext, isTrue);
+    expect(request.attachedContext, isNull);
+
+    await tester.tap(errorChip);
+    await tester.pumpAndSettle();
+    expect(hideWarning, findsNothing);
+    expect(tester.widget<FilterChip>(errorChip).selected, isTrue);
+    await tester.enterText(find.byType(TextField), '请解释运行步骤');
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pumpAndSettle();
+    expect(request.attachedContext, {'当前演示步骤': step, '当前错误': error});
+    request.done.complete('已分析');
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('reply continues while the learning panel is hidden',
       (tester) async {
     final request = _PendingAnswer();
@@ -543,6 +605,13 @@ void main() {
         in tester.widgetList<FilterChip>(find.byType(FilterChip))) {
       expect(check.selected, false);
     }
+    await tester.tap(find.widgetWithText(FilterChip, '当前错误'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('完整错误堆栈'), findsOneWidget);
+    await tester.tap(find.text('不再显示此提示'));
+    await tester.tap(find.text('确认勾选'));
+    await tester.pumpAndSettle();
+    expect(state.warnBeforeSharingAiContext, isFalse);
     expect(tester.takeException(), isNull);
   });
 }

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'execution_output.dart';
+
 class SceneValue {
   final String label;
   final dynamic value;
@@ -168,8 +170,10 @@ LearningScene learningScene(
         target: name,
         result: changed.isEmpty ? null : SceneValue(name, current[name], heap));
   }
-  final output =
-      segment.where((e) => e['kind'] == 'output').map((e) => e['text']).join();
+  final output = segment.where((e) => e['kind'] == 'output').map((e) =>
+      e['output_truncated'] == true
+          ? '${e['text']}$outputTruncatedNotice'
+          : e['text']).join();
   if (output.isNotEmpty && RegExp(r'^print\s*\(').hasMatch(code.trim())) {
     return LearningScene(
         title: '将内容输出到屏幕',

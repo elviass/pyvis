@@ -7,7 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show compute, defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:material_ui/material_ui.dart';
@@ -21,6 +21,7 @@ import 'line_theater.dart';
 import 'learning_scene.dart' show SceneValue;
 import 'runtime_value_view.dart';
 import 'execution_flow.dart';
+import 'execution_output.dart';
 import 'ide_chrome.dart';
 import 'pyvis_theme.dart';
 import 'provider_logo.dart';
@@ -164,6 +165,7 @@ class _EditorPageState extends State<EditorPage> {
   final semantics = PythonAnalysisService();
   final inlineChecks = PythonAnalysisService();
   late final InlineCompletionModel inlineModel;
+  late final bool _ownsInlineModel;
   Timer? inlineTimer;
   int inlineGeneration = 0;
   final documents = <String, EditorDocument>{};
@@ -235,10 +237,10 @@ class _EditorPageState extends State<EditorPage> {
   Map<String, dynamic>? error;
   List<File> files = [];
   int projectScan = 0;
-  Future<void>? fileRefreshTask;
   String? currentFile, project, entry;
   String status = '打开示例，观察程序里的每一次变化';
-  String console = '';
+  var console = ExecutionOutput();
+  bool importingTrace = false;
   String? prompt;
   bool running = false, playing = false, demo = false;
   bool _loading = false;
@@ -279,7 +281,9 @@ class _EditorPageState extends State<EditorPage> {
       chatTabSelected = false;
     }
     loadRecentProjects();
-    inlineModel = widget.inlineModel ?? LocalCompletionModel();
+    final suppliedModel = widget.inlineModel;
+    _ownsInlineModel = suppliedModel == null;
+    inlineModel = suppliedModel ?? LocalCompletionModel();
     inlineModel.addListener(updateInlineStatus);
     if (Platform.isMacOS) {
       const MethodChannel('dev.pyvis/editor_commands')
@@ -385,7 +389,7 @@ class _EditorPageState extends State<EditorPage> {
       if (!await confirmWorkspaceClose()) return AppExitResponse.cancel;
       inlineTimer?.cancel();
       inlineGeneration++;
-      await inlineModel.stop();
+      if (mounted && _ownsInlineModel) await inlineModel.stop();
       return AppExitResponse.exit;
     });
     runtime = RuntimeAdapter(
@@ -393,7 +397,7 @@ class _EditorPageState extends State<EditorPage> {
         onFailure: (text) {
           if (mounted) {
             setState(() {
-              console += text;
+              console.append(text);
               status = '运行环境错误';
               running = false;
               showConsole = true;
@@ -429,9 +433,7 @@ class _EditorPageState extends State<EditorPage> {
     }
     if (!Platform.isAndroid || !welcome) scheduleAnalysis();
     loadEditorPreferences();
-    if (widget.aiEnabled &&
-        widget.inlineModel == null &&
-        inlineModel.available) {
+    if (widget.aiEnabled && _ownsInlineModel && inlineModel.available) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(inlineModel.warmUp());
@@ -631,7 +633,7 @@ class _EditorPageState extends State<EditorPage> {
     semanticTimer?.cancel();
     inlineTimer?.cancel();
     inlineModel.removeListener(updateInlineStatus);
-    inlineModel.dispose();
+    if (_ownsInlineModel) inlineModel.dispose();
     inlineChecks.dispose();
     completionPopup.dispose();
     renderedLines?.removeListener(updateHintGeometry);
@@ -656,21 +658,25 @@ class _EditorPageState extends State<EditorPage> {
   void receive(Map<String, dynamic> value) {
     if (!mounted) return;
     setState(() {
-      if (value['kind'] == 'finished') {
+      if (value['kind'] == 'source') {
+        sources[value['file'] as String] = value['source'] as String;
+      } else if (value['kind'] == 'stderr') {
+        console.append(value['text'] as String);
+      } else if (value['kind'] == 'finished') {
         running = false;
         pendingDemoStep = false;
         if (!demo || playbackStops.isEmpty || cursor >= playbackStops.last) {
           playing = false;
           timer?.cancel();
         }
-        sources = Map<String, dynamic>.from(value['sources'] ?? {});
         error = value['error'] == null
             ? null
             : Map<String, dynamic>.from(value['error']);
         if (!demo && error != null) {
           final problem = error!;
-          console += '${problem['type']}：${problem['message']}\n';
+          console.append('${problem['type']}：${problem['message']}\n');
         }
+        if (value['output_truncated'] == true) console.truncated = true;
         status = error != null
             ? '执行中断 · ${error!['type']}'
             : blueprintMode
@@ -679,7 +685,10 @@ class _EditorPageState extends State<EditorPage> {
         prompt = null;
       } else if (value.containsKey('seq')) {
         recording.add(value);
-        if (running && demo) {
+        if (value['kind'] == 'output') {
+          console.append(value['text'] as String);
+          if (value['output_truncated'] == true) console.truncated = true;
+        } else if (running && demo) {
           // A Python return can produce several completed statements before the
           // next gate. Keep the first requested stop visible; later ones belong
           // to the replay buffer and must not replace it as they arrive.
@@ -695,7 +704,6 @@ class _EditorPageState extends State<EditorPage> {
           cursor = events.length - 1;
           inspectedTraceLine = null;
         }
-        if (value['kind'] == 'output') console += value['text'] as String;
         if (value['kind'] == 'input_request') {
           prompt = value['prompt'] as String;
           showConsole = true;
@@ -1168,6 +1176,7 @@ class _EditorPageState extends State<EditorPage> {
       showLineNumbers = preferences.lineNumbers;
       highlightCurrentLine = preferences.highlightCurrentLine;
       autoClosePairs = preferences.autoClosePairs;
+      warnBeforeSharingAiContext = preferences.warnBeforeSharingAiContext;
       enabledInspections = preferences.inspections;
       dictionaryWords = preferences.dictionaryWords;
       diagnostics = allDiagnostics
@@ -1192,10 +1201,12 @@ class _EditorPageState extends State<EditorPage> {
       lineNumbers: showLineNumbers,
       highlightCurrentLine: highlightCurrentLine,
       autoClosePairs: autoClosePairs,
+      warnBeforeSharingAiContext: warnBeforeSharingAiContext,
       inspections: enabledInspections,
       dictionaryWords: dictionaryWords);
 
   final aiConfigStore = AiConfigStore(cacheForSession: true);
+  bool warnBeforeSharingAiContext = true;
   final learningMessages = <AiMessage>[];
   Map<String, dynamic>? learningDiagnostic;
   Map<String, String>? learningContext;
@@ -1204,6 +1215,16 @@ class _EditorPageState extends State<EditorPage> {
   bool chatTabSelected = true;
   bool get chatTabOpen => chatInEditor && showLearningAi;
   bool get editorTabActive => !(chatTabOpen && chatTabSelected);
+
+  Future<void> hideAiContextWarning() async {
+    setState(() => warnBeforeSharingAiContext = false);
+    try {
+      await editorPreferences.save();
+    } catch (_) {
+      if (mounted) reportError('无法保存提示设置，本次会话内不再显示。');
+    }
+  }
+
   void toggleChatPlacement() => setState(() {
         learningContext ??= {};
         chatTabSelected = true;
@@ -1367,6 +1388,8 @@ class _EditorPageState extends State<EditorPage> {
                   onModelChanged: () => setState(() {}),
                   onTogglePlacement: toggleChatPlacement,
                   available: learningContext!,
+                  warnBeforeSharingContext: warnBeforeSharingAiContext,
+                  onHideContextWarning: hideAiContextWarning,
                   messages: learningMessages,
                   store: aiConfigStore,
                   references: learningReferences,
@@ -2146,7 +2169,7 @@ class _EditorPageState extends State<EditorPage> {
           // Validate the extension after selection instead.
           type: Platform.isMacOS ? FileType.any : FileType.custom,
           allowedExtensions: Platform.isMacOS ? null : ['py']);
-      if (result == null || result.files.single.path == null) return;
+      if (!mounted || result == null || result.files.single.path == null) return;
       final path = result.files.single.path!;
       if (p.extension(path).toLowerCase() != '.py') {
         reportError('请选择 Python 源码文件（.py）。');
@@ -2224,13 +2247,7 @@ class _EditorPageState extends State<EditorPage> {
       name.startsWith('.') ||
       const ['__pycache__', 'venv', 'node_modules'].contains(name);
 
-  Future<void> refreshFiles() {
-    final refresh = scanProjectFiles();
-    fileRefreshTask = refresh;
-    return refresh;
-  }
-
-  Future<void> scanProjectFiles() async {
+  Future<void> refreshFiles() async {
     final root = project;
     if (root == null) return;
     final scan = ++projectScan;
@@ -2268,7 +2285,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> pickProject() async {
-    if (!await confirmWorkspaceClose()) return;
+    if (!await confirmWorkspaceClose() || !mounted) return;
     final folder =
         await FilePicker.platform.getDirectoryPath(dialogTitle: '打开学习项目');
     if (folder == null) return;
@@ -2276,6 +2293,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> enterProject(String folder) async {
+    if (!mounted) return;
     if (!Directory(folder).existsSync()) {
       reportError('项目目录已不存在');
       return;
@@ -2307,6 +2325,52 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  Future<List<Map<String, dynamic>>> checkRunProject(
+      String entry, String project) async {
+    final root = p.normalize(p.absolute(project));
+    final resolvedRoot = await Directory(root)
+        .resolveSymbolicLinks()
+        .onError<FileSystemException>((_, __) => root);
+    bool isProjectPath(String path, String parent) =>
+        p.isWithin(parent, path) &&
+        !p.split(p.relative(path, from: parent)).any(excludedProjectName);
+
+    // Read with the editor's file access, and let CPython discover imports.
+    final visited = <String>{};
+    final diagnostics = <Map<String, dynamic>>[];
+    var pending = [entry];
+    while (pending.isNotEmpty) {
+      final batch = <String, String>{};
+      final errors = <String, String>{};
+      for (final path in pending) {
+        if (!visited.add(path)) continue;
+        try {
+          if (path != entry) {
+            if (!isProjectPath(path, root) || !await File(path).exists()) {
+              continue;
+            }
+            final resolved = await File(path).resolveSymbolicLinks();
+            if (!isProjectPath(resolved, resolvedRoot)) continue;
+          }
+          batch[path] =
+              (await PythonSourceFile.read(File(path), semantics)).text;
+        } catch (error) {
+          errors[path] = '无法读取运行源码：$error';
+        }
+      }
+      if (batch.isEmpty && errors.isEmpty) break;
+      final result = await analysis.checkProject(batch, errors, root);
+      diagnostics.addAll((result['diagnostics'] as List)
+          .map((item) => Map<String, dynamic>.from(item)));
+      pending = (result['dependencies'] as List)
+          .cast<String>()
+          .map(p.normalize)
+          .where((path) => !visited.contains(path))
+          .toList();
+    }
+    return diagnostics;
+  }
+
   Future<void> run(bool visual) async {
     if (running || checkingRun) return;
     timer?.cancel();
@@ -2317,7 +2381,6 @@ class _EditorPageState extends State<EditorPage> {
     });
     try {
       if (!await saveAllDocuments()) return;
-      await fileRefreshTask;
       if (!mounted) return;
       if (entry == null || project == null) return;
       analysisTimer?.cancel();
@@ -2328,22 +2391,8 @@ class _EditorPageState extends State<EditorPage> {
       });
       final checkedEntry = entry!, checkedProject = project!;
       final checkedBuffer = editor.text;
-      final snapshot = <String, String>{};
-      final sourceErrors = <String, String>{};
-      for (final path in {
-        ...files.map((file) => file.absolute.path),
-        checkedEntry
-      }) {
-        try {
-          snapshot[path] =
-              (await PythonSourceFile.read(File(path), semantics)).text;
-        } catch (error) {
-          sourceErrors[path] = '无法读取运行源码：$error';
-        }
-      }
       try {
-        final result = await analysis.check(snapshot, checkedEntry, checkedProject,
-            sourceErrors: sourceErrors);
+        final found = await checkRunProject(checkedEntry, checkedProject);
         if (!mounted) return;
         if (entry != checkedEntry ||
             project != checkedProject ||
@@ -2351,9 +2400,6 @@ class _EditorPageState extends State<EditorPage> {
           setState(() => status = '代码或入口已改变，请重新运行以检查最新内容');
           return;
         }
-        final found = (result['diagnostics'] as List)
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
         setState(() {
           diagnostics = found;
           analysisFailure = null;
@@ -2388,10 +2434,10 @@ class _EditorPageState extends State<EditorPage> {
       runtime.stop();
       setState(() {
         events = [];
-        sources = snapshot;
+        sources = {};
         runEntry = checkedEntry;
         error = null;
-        console = '';
+        console.clear();
         cursor = 0;
         selectedFrame = -1;
         prompt = null;
@@ -2415,7 +2461,9 @@ class _EditorPageState extends State<EditorPage> {
         setState(() {
           running = false;
           status = '启动失败';
-          console = '$e';
+          console
+            ..clear()
+            ..append('$e');
           showConsole = true;
         });
       }
@@ -2512,11 +2560,11 @@ class _EditorPageState extends State<EditorPage> {
           .saveFile(dialogTitle: '保存执行记录', fileName: 'learning.trace.json');
       if (path == null) return;
       await File(path).writeAsString(jsonEncode({
-        'version': 1,
+        ...recording.compactArchive,
         'sources': sources,
-        'events': events,
         'error': error,
-        'output': console
+        'output': console.text,
+        if (console.truncated) 'output_truncated': true
       }));
     } catch (e) {
       reportError('保存执行记录失败：$e');
@@ -2524,24 +2572,24 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> importTrace() async {
-    final pick = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-    if (pick == null) return;
+    if (importingTrace) return;
+    importingTrace = true;
     try {
-      final archive =
-          decodeTrace(await File(pick.files.single.path!).readAsString());
+      final pick = await FilePicker.platform
+          .pickFiles(type: FileType.custom, allowedExtensions: ['json']);
+      if (!mounted || pick == null) return;
+      final path = pick.files.single.path;
+      if (path == null) throw const FormatException('无法读取所选文件');
+      final archive = await compute(readTraceFile, path, debugLabel: 'readTrace');
+      if (!mounted) return;
       runtime.stop();
       timer?.cancel();
       setState(() {
-        recording = ExecutionRecording(
-            (archive['events'] as List).cast<Map<String, dynamic>>());
-        sources = Map<String, dynamic>.from(archive['sources'] ?? {});
+        recording = archive.recording;
+        sources = archive.sources;
         cursor = 0;
-        error = archive['error'];
-        final archivedOutput = archive['output'];
-        console = archivedOutput is Map
-            ? '${archivedOutput['stdout'] ?? ''}${archivedOutput['stderr'] ?? ''}'
-            : '${archivedOutput ?? ''}';
+        error = archive.error;
+        console = archive.console;
         running = false;
         playing = false;
         status = '已打开历史执行记录';
@@ -2551,9 +2599,12 @@ class _EditorPageState extends State<EditorPage> {
       });
     } catch (e) {
       if (mounted) {
+        final message = e is FormatException ? e.message : e.toString();
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('无法打开记录：$e')));
+            .showSnackBar(SnackBar(content: Text('无法打开记录：$message')));
       }
+    } finally {
+      importingTrace = false;
     }
   }
 
@@ -3011,6 +3062,8 @@ class _EditorPageState extends State<EditorPage> {
                     onModelChanged: () => setState(() {}),
                     onTogglePlacement: toggleChatPlacement,
                     available: learningContext ?? const {},
+                    warnBeforeSharingContext: warnBeforeSharingAiContext,
+                    onHideContextWarning: hideAiContextWarning,
                     messages: learningMessages,
                     store: aiConfigStore,
                     references: learningReferences,
@@ -4440,7 +4493,8 @@ class _EditorPageState extends State<EditorPage> {
             child: SingleChildScrollView(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: SelectableText(console.isEmpty ? '暂无输出' : console,
+                child: SelectableText(
+                    console.isNotEmpty ? console.displayText : '暂无输出',
                     style: const TextStyle(
                         fontSize: 13,
                         height: 1.5,

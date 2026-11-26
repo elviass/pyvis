@@ -95,6 +95,11 @@ void main() {
           tester.getRect(find.byType(TextField)).bottom, lessThan(size.height));
       await tester.tap(find.text('选中的代码'));
       await tester.pumpAndSettle();
+      final confirm = find.text('确认勾选');
+      expect(tester.getRect(confirm).bottom, lessThan(size.height));
+      expect(find.text('不再显示此提示'), findsOneWidget);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
       expect(find.text('本次附带 1 项上下文'), findsOneWidget);
       await tester.drag(find.byType(ListView), const Offset(0, -200));
       await tester.pumpAndSettle();

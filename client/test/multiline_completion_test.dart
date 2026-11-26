@@ -1,4 +1,6 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart'
+    show FlutterMemoryAllocations, ObjectCreated, ObjectEvent;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
@@ -89,6 +91,22 @@ void main() {
     final keys = PythonCompletionActions(editor,
         acceptInline: decorations.acceptInline,
         dismissInline: decorations.dismissInline);
+    final previewPainters = <TextPainter>[];
+    void trackPreview(ObjectEvent event) {
+      final painter = event.object;
+      if (event is ObjectCreated &&
+          painter is TextPainter &&
+          const [
+            ' key, value in Grades.items():',
+            '    print(key, value)',
+            'Tab 以补全',
+          ].contains(painter.text?.toPlainText())) {
+        previewPainters.add(painter);
+      }
+    }
+    final allocations = FlutterMemoryAllocations.instance;
+    allocations.addListener(trackPreview);
+    addTearDown(() => allocations.removeListener(trackPreview));
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
             body: CodeEditor(
@@ -112,16 +130,20 @@ void main() {
     expect(editor.text, original);
     expect(focus.hasFocus, isTrue);
     expect(editor.isComposing, isFalse);
+    expect(previewPainters.where((painter) => !painter.debugDisposed),
+        hasLength(3));
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pumpAndSettle();
     expect(editor.text,
         'Grades={"Alice": 90}\nfor key, value in Grades.items():\n    print(key, value)\nprint("end")');
+    expect(previewPainters.every((painter) => painter.debugDisposed), isTrue);
     editor.undo();
     await tester.pumpAndSettle();
     expect(editor.text, original);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(decorations.ghost, isNull);
+    expect(previewPainters.every((painter) => painter.debugDisposed), isTrue);
     expect(editor.text, original);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

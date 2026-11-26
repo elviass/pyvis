@@ -8,6 +8,7 @@ import 'editor_commands.dart';
 class EditorPreferences {
   double fontSize;
   bool softWrap, miniMap, lineNumbers, highlightCurrentLine, autoClosePairs;
+  bool warnBeforeSharingAiContext;
   Set<String> inspections;
   Set<String> dictionaryWords;
   EditorPreferences(
@@ -17,6 +18,7 @@ class EditorPreferences {
       this.lineNumbers = true,
       this.highlightCurrentLine = true,
       this.autoClosePairs = true,
+      this.warnBeforeSharingAiContext = true,
       Set<String>? inspections,
       Set<String>? dictionaryWords})
       : inspections = inspections ??
@@ -33,6 +35,7 @@ class EditorPreferences {
       lineNumbers: json['line_numbers'] != false,
       highlightCurrentLine: json['highlight_current_line'] != false,
       autoClosePairs: json['auto_close_pairs'] != false,
+      warnBeforeSharingAiContext: json['warn_before_sharing_ai_context'] != false,
       dictionaryWords:
           (json['dictionary_words'] as List? ?? []).whereType<String>().toSet(),
       inspections: json['inspections'] is List
@@ -50,6 +53,7 @@ class EditorPreferences {
         'line_numbers': lineNumbers,
         'highlight_current_line': highlightCurrentLine,
         'auto_close_pairs': autoClosePairs,
+        'warn_before_sharing_ai_context': warnBeforeSharingAiContext,
         'inspections': inspections.toList()
       };
   static File? get file {

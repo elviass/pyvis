@@ -4,8 +4,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pyvis_runtime import Recorder
+from pyvis_runtime.engine import Output
 
 
 class RuntimeTests(unittest.TestCase):
@@ -27,6 +29,48 @@ class RuntimeTests(unittest.TestCase):
             path = Path(folder) / 'main.py'
             path.write_text(source, encoding='utf-8')
             return Recorder(**kwargs).run(path)
+
+    def test_output_keeps_channels_and_order_without_capturing(self):
+        recorder = Recorder(max_events=1)
+        with patch.object(recorder.snapshot, 'capture', side_effect=AssertionError('unexpected snapshot')):
+            stdout, stderr = Output(recorder, 'stdout'), Output(recorder, 'stderr')
+            self.assertEqual(stdout.write('a'), 1)
+            stdout.flush()
+            stderr.write('好')
+            stdout.write('\n')
+        self.assertEqual(recorder.output, {'stdout': 'a\n', 'stderr': '好'})
+        self.assertEqual([(e['channel'], e['text']) for e in recorder.events],
+                         [('stdout', 'a'), ('stderr', '好'), ('stdout', '\n')])
+        self.assertEqual([e['seq'] for e in recorder.events], [0, 1, 2])
+        for event in recorder.events:
+            self.assertEqual((event['frames'], event['heap'], event['values']), ([], {}, []))
+
+    def test_output_limit_keeps_complete_utf8_characters_and_execution_continues(self):
+        result = self.run_code(
+            "import sys\nsys.stdout.write('A')\n"
+            "count = sys.stderr.write('好😀!')\n"
+            "sys.stdout.write('later')\ncontinued = count + 40\n",
+            max_output_bytes=7,
+        )
+        self.assertIsNone(result['error'])
+        self.assertTrue(result['output_truncated'])
+        self.assertEqual(result['output'], {'stdout': 'A', 'stderr': '好'})
+        output = [e for e in result['events'] if e['kind'] == 'output']
+        self.assertEqual([(e['channel'], e['text']) for e in output],
+                         [('stdout', 'A'), ('stderr', '好')])
+        self.assertEqual([e.get('output_truncated', False) for e in output], [False, True])
+        self.assertEqual(result['events'][-1]['frames'][-1]['locals']['continued']['value'], 43)
+        self.assertEqual([e['seq'] for e in result['events']], list(range(len(result['events']))))
+
+    def test_fragment_limit_reports_once_without_using_the_execution_budget(self):
+        recorder = Recorder(max_events=1, max_output_events=2)
+        stream = Output(recorder, 'stdout')
+        for part in ('a', 'b', 'c', 'd'):
+            self.assertEqual(stream.write(part), 1)
+        self.assertEqual(recorder.output['stdout'], 'ab')
+        self.assertEqual([e['text'] for e in recorder.events], ['a', 'b', ''])
+        self.assertEqual(sum(e.get('output_truncated', False) for e in recorder.events), 1)
+        self.assertEqual(recorder.emit('line')['seq'], 3)
 
     def test_side_effects_and_short_circuit(self):
         result = self.run_code('''calls = []
@@ -298,6 +342,45 @@ print(calls, b, values, values is alias)
             sys.modules.pop('calc_unique_pyvis', None)
         self.assertEqual(result['output']['stdout'], '8\n')
         self.assertTrue(any(e['file'].endswith('calc_unique_pyvis.py') for e in result['events']))
+
+    def test_recording_reads_only_executed_project_imports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            package = root / 'pyvis_recording_package'
+            package.mkdir()
+            entry = root / 'main.py'
+            init = package / '__init__.py'
+            helper = package / 'helper.py'
+            peer = package / 'peer.py'
+            entry.write_text('from pyvis_recording_package import value\nprint(value)\n')
+            init.write_text('from .helper import value\n')
+            helper.write_text('from . import peer\nvalue = peer.value + 1\n')
+            peer.write_text('from . import helper\nvalue = 2\n')
+            (package / 'unused.py').write_text('unused = 42\n')
+            reads, wire = [], []
+            read_bytes = Path.read_bytes
+
+            def record_read(path):
+                reads.append(path)
+                return read_bytes(path)
+
+            try:
+                with patch.object(Path, 'read_bytes', record_read):
+                    result = Recorder(on_event=wire.append, on_source=lambda file, _: wire.append(file)).run(entry)
+            finally:
+                for name in ('', '.helper', '.peer'):
+                    sys.modules.pop(package.name + name, None)
+
+            expected = [entry, init, helper, peer]
+            self.assertEqual(reads, expected)
+            self.assertEqual(list(result['sources']), list(map(str, expected)))
+            self.assertEqual(result['output']['stdout'], '3\n')
+            seen = set()
+            for item in wire:
+                if isinstance(item, str):
+                    seen.add(item)
+                elif item['file'] is not None:
+                    self.assertIn(item['file'], seen)
 
 
 if __name__ == '__main__':

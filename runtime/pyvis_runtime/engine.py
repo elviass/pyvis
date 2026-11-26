@@ -13,6 +13,7 @@ import traceback
 import types
 import uuid
 import weakref
+from .local_imports import is_project_source
 from .source_encoding import decode_source
 
 
@@ -148,7 +149,8 @@ class Snapshot:
                 entry['parameters'] = list(obj.__code__.co_varnames[:obj.__code__.co_argcount])
             elif type(obj) is type:
                 entry['name'] = type.__getattribute__(obj, '__name__')
-            else:
+            elif type(obj) is not Output:
+                # The console wrapper points back to this recorder and its live snapshot.
                 # Do not run properties, custom repr or custom attribute access.
                 attrs = {}
                 for base in type.__getattribute__(type(obj), '__mro__'):
@@ -186,8 +188,7 @@ class Output(io.TextIOBase):
 
     def write(self, text):
         if text:
-            self.recorder.output[self.channel] += text
-            self.recorder.emit('output', text=text, channel=self.channel)
+            self.recorder.write_output(self.channel, text)
         return len(text)
 
     def flush(self):
@@ -195,19 +196,26 @@ class Output(io.TextIOBase):
 
 
 class Recorder:
-    def __init__(self, on_event=None, gate=None, input_provider=None, max_events=20000, *, retain_events=True):
+    def __init__(self, on_event=None, gate=None, input_provider=None, max_events=20000,
+                 *, retain_events=True, on_source=None, max_output_bytes=2 * 1024 * 1024,
+                 max_output_events=20000):
         self.events = []
         self.event_count = 0
+        self.trace_event_count = 0
         self.retain_events = retain_events
         self.source_lines = {}
         self.encoded_lines = {}
         self.on_event, self.gate = on_event, gate
+        self.on_source = on_source
         self.input_provider = input_provider or (lambda prompt: '')
         self.max_events = max_events
         self.frames = []
         self.frame_counter = 0
         self.snapshot = Snapshot()
-        self.output = {'stdout': '', 'stderr': ''}
+        self._output = {'stdout': io.StringIO(), 'stderr': io.StringIO()}
+        self._output_bytes_left = max_output_bytes
+        self._output_events_left = max_output_events
+        self.output_truncated = False
         self.sources = {}
         self.source_errors = {}
         self.busy = False
@@ -218,20 +226,54 @@ class Recorder:
         self.expression_info = {}
         self.expression_operators = {}
 
+    @property
+    def output(self):
+        return {channel: buffer.getvalue() for channel, buffer in self._output.items()}
+
+    def write_output(self, channel, text):
+        if self.busy or self.output_truncated:
+            return
+        remaining = self._output_bytes_left if self._output_events_left > 0 else 0
+        # Even a single large write only encodes a bounded prefix.
+        prefix = text[:remaining]
+        encoded = prefix.encode('utf-8', 'surrogatepass')
+        size = len(encoded)
+        if size > remaining:
+            size = remaining
+            while encoded[size] & 0xC0 == 0x80:
+                size -= 1
+            prefix = encoded[:size].decode('utf-8', 'surrogatepass')
+        self._output_bytes_left -= size
+        if prefix:
+            self._output_events_left -= 1
+            self._output[channel].write(prefix)
+        if len(prefix) != len(text):
+            self.output_truncated = True
+            self.emit('output', text=prefix, channel=channel, output_truncated=True)
+        else:
+            self.emit('output', text=prefix, channel=channel)
+
     def emit(self, kind, frame=None, *, captured=None, **payload):
         if self.busy:
             return
-        if self.event_count >= self.max_events:
+        is_output = kind == 'output'
+        if not is_output and self.trace_event_count >= self.max_events:
             raise RecordingLimit('执行记录达到上限，请缩短循环或分段运行。')
         self.busy = True
         try:
             frame = frame or (self.frames[-1][1] if self.frames else None)
             values = payload.pop('_values', ())
+            if is_output:
+                captured = {'frames': [], 'heap': {}, 'values': []}
+            elif captured is None:
+                captured = self.snapshot.capture(self.frames, values)
             event = {'seq': self.event_count, 'kind': kind,
                      'file': frame.f_code.co_filename if frame else None,
                      'line': frame.f_lineno if frame else None,
-                     **payload, **(captured if captured is not None else self.snapshot.capture(self.frames, values))}
+                     **payload, **captured}
             self.event_count += 1
+            if not is_output:
+                self.trace_event_count += 1
             if self.retain_events:
                 self.events.append(event)
             if self.on_event:
@@ -329,13 +371,6 @@ class Recorder:
     def run(self, entry, project=None):
         entry = Path(entry).resolve()
         project = Path(project or entry.parent).resolve()
-        for folder, directories, filenames in os.walk(project):
-            directories[:] = [name for name in directories
-                              if not name.startswith('.') and name not in ('venv', 'node_modules', '__pycache__')]
-            for name in filenames:
-                if name.startswith('.') or not name.endswith('.py'):
-                    continue
-                self.load_source(Path(folder) / name)
         if str(entry) not in self.sources and str(entry) not in self.source_errors:
             self.load_source(entry)
         old_path, old_argv, old_cwd = sys.path[:], sys.argv[:], os.getcwd()
@@ -344,25 +379,28 @@ class Recorder:
         old_hook = getattr(builtins, self.hook_name, None)
         # Local modules are loaded through the same transformer.
         import importlib.abc
-        import importlib.util
+        import importlib.machinery
         recorder = self
 
         class Loader(importlib.abc.Loader):
             def create_module(self, spec):
                 return None
             def exec_module(self, module):
-                exec(recorder.compile(module.__spec__.origin), module.__dict__)
+                filename = module.__spec__.origin
+                if filename not in recorder.sources and filename not in recorder.source_errors:
+                    recorder.load_source(Path(filename))
+                exec(recorder.compile(filename), module.__dict__)
 
         class Finder(importlib.abc.MetaPathFinder):
             def find_spec(self, fullname, path=None, target=None):
-                parts = fullname.split('.')
-                file = project.joinpath(*parts).with_suffix('.py')
-                package = project.joinpath(*parts, '__init__.py')
-                if str(package) in recorder.sources or str(package) in recorder.source_errors:
-                    return importlib.util.spec_from_file_location(fullname, package, loader=Loader(), submodule_search_locations=[str(package.parent)])
-                if str(file) in recorder.sources or str(file) in recorder.source_errors:
-                    return importlib.util.spec_from_file_location(fullname, file, loader=Loader())
-                return None
+                spec = importlib.machinery.PathFinder.find_spec(
+                    fullname, [str(project)] if path is None else path, target)
+                if spec is None or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
+                    return None
+                if not is_project_source(Path(spec.origin), project):
+                    return None
+                spec.loader = Loader()
+                return spec
 
         finder = Finder()
         def read_input(prompt=''):
@@ -409,6 +447,7 @@ class Recorder:
             os.chdir(old_cwd)
         return {'version': 1, 'python': sys.version, 'sources': self.sources,
                 'events': self.events, 'output': self.output, 'error': self.error,
+                **({'output_truncated': True} if self.output_truncated else {}),
                 'status': 'error' if self.error else 'completed'}
 
     def load_source(self, path):
@@ -422,6 +461,9 @@ class Recorder:
             self.source_errors[filename] = SyntaxError(error.msg, (filename, error.lineno or 1, error.offset or 1, None))
         except (OSError, UnicodeError, LookupError) as error:
             self.source_errors[filename] = SyntaxError(str(error), (filename, 1, 1, None))
+        else:
+            if self.on_source:
+                self.on_source(filename, source)
 
     def compile(self, filename):
         if filename in self.source_errors:

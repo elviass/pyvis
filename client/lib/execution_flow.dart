@@ -1,3 +1,5 @@
+import 'recording_heaps.dart';
+
 class FlowPlace {
   final String label, code, file;
   final int? line;
@@ -10,6 +12,7 @@ bool isLearningStop(Map e) =>
     (e['kind'] == 'call' && (e['frames'] as List? ?? []).length > 1);
 
 class ExecutionRecording {
+  final _heaps = RecordingHeaps();
   final events = <Map<String, dynamic>>[];
   final stops = <int>[];
   bool hasStatement = false;
@@ -20,10 +23,23 @@ class ExecutionRecording {
     }
   }
 
-  void add(Map<String, dynamic> event) {
+  void readHeapTables(Map<String, dynamic> archive) =>
+      _heaps.readTables(archive['objects'], archive['heap_blocks']);
+
+  Map<String, dynamic> readHeapReferences(Map<String, dynamic> event) =>
+      _heaps.readEvent(event);
+
+  Map<String, dynamic> get compactArchive => {
+        'version': 2,
+        ..._heaps.archiveTables,
+        'events': events.map(_heaps.archiveEvent).toList(),
+      };
+
+  void add(Map<String, dynamic> event, {bool compareFullObjects = false}) {
+    final saved = _heaps.capture(event, compareFullObjects: compareFullObjects);
     if (isLearningStop(event)) stops.add(events.length);
     if (event['kind'] == 'statement') hasStatement = true;
-    events.add(event);
+    events.add(saved);
   }
 
   /// Finds the insertion point after the last stop at or before the cursor.

@@ -48,6 +48,18 @@ class EditorPresentationTests(unittest.TestCase):
     def test_technical_names_urls_escapes_and_chinese_are_not_spelling_errors(self):
         self.assertEqual(inspect_spelling('import asyncio\nargs = "https://examplle.invalid/helo \\n 中文"\nprint(args)\n','/tmp/style.py'),[])
 
+    def test_long_word_is_skipped_without_losing_nearby_spelling_suggestions(self):
+        from unittest.mock import patch
+        from pyvis_runtime.spelling import alternatives
+
+        source = f'# {"z" * 100_000} helo\n'
+        with patch('pyvis_runtime.spelling.alternatives', wraps=alternatives) as suggest:
+            issues = inspect_spelling(source, '/tmp/style.py')
+
+        suggest.assert_called_once_with('helo')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['column'], 100_004)
+
     def test_pycharm_suppression_uses_comments_and_keeps_syntax_errors(self):
         source = '# noinspection PyTypeChecker\nvalue: int = "text"\nprint(value)\n'
         self.assertFalse(any(d['code']=='invalid-assignment' for d in analyze(source,'/tmp/style.py')['diagnostics']))
