@@ -35,12 +35,13 @@ hdiutil attach -quiet -readonly -nobrowse -mountpoint "$stage/mount" "$stage/Pyv
 mounted=true
 test "$(readlink "$stage/mount/Applications")" = /Applications
 codesign --verify --deep --strict "$stage/mount/Pyvis.app"
-lipo -archs "$stage/mount/Pyvis.app/Contents/MacOS/Pyvis"
-case "$(uname -m)" in
-    arm64) arch=arm64 ;;
-    x86_64) arch=x86_64 ;;
-esac
-"$stage/mount/Pyvis.app/Contents/Resources/cpython/$arch/python/bin/python3" -I --version
+architectures=$(lipo -archs "$stage/mount/Pyvis.app/Contents/MacOS/Pyvis")
+printf 'Packaged architectures: %s\n' "$architectures"
+for arch in $architectures; do
+    python="$stage/mount/Pyvis.app/Contents/Resources/cpython/$arch/python/bin/python3"
+    test -x "$python"
+    codesign --verify --strict "$python"
+done
 hdiutil detach -quiet "$stage/mount"
 mounted=false
 
