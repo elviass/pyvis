@@ -54,12 +54,10 @@ flutter build apk --release --target-platform android-arm64,android-x64
 **macOS**（Xcode）
 
 ```sh
-cd client
-flutter pub get
-flutter build macos --release
+./tools/build_macos.sh
 ```
 
-产物位于 `client/build/macos/Build/Products/Release/Pyvis.app`。开发模式可在仓库根目录运行 [run_desktop.sh](tools/run_desktop.sh)。
+应用位于 `client/build/macos/Build/Products/Release/Pyvis.app`，磁盘映像位于 `client/build/macos/packages/Pyvis.dmg`。也可以运行 GitHub Actions 的 `macOS DMG` 工作流，从 `Pyvis-macOS` 构建产物下载。测试包使用 ad-hoc 签名，下载后首次打开时可能需要在「系统设置 → 隐私与安全性」确认。开发模式可在仓库根目录运行 [run_desktop.sh](tools/run_desktop.sh)。
 
 **Windows x64**（Visual Studio C++ 桌面构建工具、WiX 6）
 

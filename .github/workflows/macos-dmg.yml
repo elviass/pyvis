@@ -1,0 +1,29 @@
+name: macOS DMG
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        run: |
+          git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Build and verify macOS DMG
+        run: ./tools/build_macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pyvis-macOS
+          path: client/build/macos/packages/Pyvis.dmg
+          if-no-files-found: error
