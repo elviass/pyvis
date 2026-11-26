@@ -87,8 +87,15 @@ jobs:
             if ((Get-FileHash "$Directory/$iconAsset").Hash -ne $iconHash) {
               throw 'Packaged in-app icon differs from the source asset.'
             }
-            & "$Directory/python/python.exe" -B -c 'import pyvis_runtime'
-            if ($LASTEXITCODE -ne 0) { throw 'Packaged CPython failed.' }
+            @'
+          from pyvis_runtime.editor_tools import inspect_source
+
+          diagnostics, failures = inspect_source('import math\nvalue: int = str()\n', 'main.py')
+          codes = {item['code'] for item in diagnostics}
+          if failures or not {'F401', 'invalid-assignment'} <= codes:
+              raise RuntimeError(f'Offline analysis failed: {failures}, {codes}')
+          '@ | & "$Directory/python/python.exe" -B -X utf8 -
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged offline analysis failed.' }
           }
           $zip = Get-Item "$packages/*-portable.zip"
           $portable = Join-Path $env:RUNNER_TEMP pyvis-portable
