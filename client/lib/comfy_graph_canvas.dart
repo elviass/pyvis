@@ -8,6 +8,53 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 typedef GraphCanvasBuilder = Widget Function(BuildContext context,
     Map<String, dynamic> scene, ValueChanged<Map> onEvent);
 
+/// Keeps WebView2's translated wheel events separate from trackpad gestures.
+class GraphTrackpad extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onStart, onEnd;
+  final void Function(Offset anchor, double scale) onZoom;
+  final void Function(Offset anchor, Offset delta) onPan;
+
+  const GraphTrackpad({
+    super.key,
+    required this.child,
+    required this.onStart,
+    required this.onEnd,
+    required this.onZoom,
+    required this.onPan,
+  });
+
+  @override
+  State<GraphTrackpad> createState() => _GraphTrackpadState();
+}
+
+class _GraphTrackpadState extends State<GraphTrackpad> {
+  double scale = 1;
+  bool pinching = false;
+
+  @override
+  Widget build(BuildContext context) => Listener(
+        onPointerPanZoomStart: (_) {
+          scale = 1;
+          pinching = false;
+          widget.onStart();
+        },
+        onPointerPanZoomUpdate: (event) {
+          final next = event.scale;
+          if (!next.isFinite || next <= 0) return;
+          if (next != scale) {
+            pinching = true;
+            scale = next;
+            widget.onZoom(event.localPosition, next);
+          } else if (!pinching && event.localPanDelta != Offset.zero) {
+            widget.onPan(event.localPosition, event.localPanDelta);
+          }
+        },
+        onPointerPanZoomEnd: (_) => widget.onEnd(),
+        child: widget.child,
+      );
+}
+
 /// A single offline document avoids platform-specific file-origin restrictions.
 class ComfyGraphAssets {
   static final Future<String> document = _load();
@@ -119,6 +166,19 @@ class _ComfyGraphCanvasState extends State<ComfyGraphCanvas> {
     }
   }
 
+  Future<void> sendTrackpad(String method,
+      [List<double> arguments = const []]) async {
+    final webView = controller;
+    if (!ready || webView == null) return;
+    final args = jsonEncode(arguments);
+    try {
+      await webView.evaluateJavascript(
+          source: 'window.PyvisCanvas?.$method(...$args);');
+    } catch (error) {
+      if (mounted) widget.onEvent({'action': 'error', 'message': '$error'});
+    }
+  }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<String>(
       future: ComfyGraphAssets.document,
@@ -141,7 +201,8 @@ class _ComfyGraphCanvasState extends State<ComfyGraphCanvas> {
                   },
                   creationParamsCodec: const StandardMessageCodec()));
         }
-        return InAppWebView(
+        final windows = defaultTargetPlatform == TargetPlatform.windows;
+        final webView = InAppWebView(
             key: const ValueKey('comfy-native-webview'),
             initialData: InAppWebViewInitialData(data: snapshot.data!),
             initialSettings: InAppWebViewSettings(
@@ -149,6 +210,7 @@ class _ComfyGraphCanvasState extends State<ComfyGraphCanvas> {
                 transparentBackground: false,
                 blockNetworkLoads: true,
                 supportZoom: false,
+                pinchZoomEnabled: windows ? false : null,
                 disableContextMenu: true,
                 isInspectable: kDebugMode),
             onWebViewCreated: (value) {
@@ -187,5 +249,15 @@ class _ComfyGraphCanvasState extends State<ComfyGraphCanvas> {
                 event({'action': 'error', 'message': error.description});
               }
             });
+        return windows
+            ? GraphTrackpad(
+                onStart: () => sendTrackpad('beginWindowsTrackpad'),
+                onZoom: (anchor, scale) => sendTrackpad(
+                    'zoomWindowsTrackpad', [anchor.dx, anchor.dy, scale]),
+                onPan: (anchor, delta) => sendTrackpad(
+                    'panTrackpad', [anchor.dx, anchor.dy, delta.dx, delta.dy]),
+                onEnd: () => sendTrackpad('endWindowsTrackpad'),
+                child: webView)
+            : webView;
       });
 }

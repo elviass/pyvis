@@ -69,8 +69,75 @@ private final class GraphMessageHandler: NSObject, WKScriptMessageHandler {
   }
 }
 
+private final class GraphWebView: WKWebView {
+  private var magnifyMonitor: Any?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    removeMagnifyMonitor()
+    if window != nil {
+      // Route trackpad magnification before Flutter or WebKit claim the event.
+      magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
+        return self?.handleMagnify(event) == true ? nil : event
+      }
+    }
+  }
+
+  private func removeMagnifyMonitor() {
+    if let monitor = magnifyMonitor {
+      NSEvent.removeMonitor(monitor)
+      magnifyMonitor = nil
+    }
+  }
+
+  deinit { removeMagnifyMonitor() }
+
+  func graphPoint(_ point: NSPoint) -> NSPoint {
+    NSPoint(x: point.x - bounds.minX,
+            y: isFlipped ? point.y - bounds.minY : bounds.maxY - point.y)
+  }
+
+  override func magnify(with event: NSEvent) {
+    if !handleMagnify(event) { super.magnify(with: event) }
+  }
+
+  private func handleMagnify(_ event: NSEvent) -> Bool {
+    guard let window, !isHiddenOrHasHiddenAncestor,
+          event.window === window || (event.window == nil && window.isKeyWindow) else { return false }
+    let location = event.window == nil
+      ? window.convertPoint(fromScreen: event.locationInWindow)
+      : event.locationInWindow
+    let localPoint = convert(location, from: nil)
+    guard visibleRect.contains(localPoint) else { return false }
+
+    // NSEvent magnification is the change from the preceding event.
+    let factor = 1 + event.magnification
+    if factor.isFinite && factor > 0 && factor != 1 {
+      let point = graphPoint(localPoint)
+      callAsyncJavaScript("window.PyvisCanvas?.zoomTrackpad(x, y, factor);",
+                          arguments: ["x": point.x, "y": point.y, "factor": factor],
+                          in: nil, in: .page, completionHandler: nil)
+    }
+    return true
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    guard event.hasPreciseScrollingDeltas,
+          !event.phase.isEmpty || !event.momentumPhase.isEmpty else {
+      super.scrollWheel(with: event)
+      return
+    }
+    let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
+    guard dx != 0 || dy != 0 else { return }
+    let point = graphPoint(convert(event.locationInWindow, from: nil))
+    callAsyncJavaScript("window.PyvisCanvas?.panTrackpad(x, y, dx, dy);",
+                        arguments: ["x": point.x, "y": point.y, "dx": dx, "dy": dy],
+                        in: nil, in: .page, completionHandler: nil)
+  }
+}
+
 private final class GraphCanvasHost: NSView, WKNavigationDelegate {
-  let webView: WKWebView
+  let webView: GraphWebView
   let channel: FlutterMethodChannel
   let handler = GraphMessageHandler()
   init(messenger: FlutterBinaryMessenger, channelName: String, html: String, size: NSSize) {
@@ -78,7 +145,7 @@ private final class GraphCanvasHost: NSView, WKNavigationDelegate {
     let config = WKWebViewConfiguration()
     config.userContentController.add(handler, name: "graph")
     config.userContentController.addUserScript(WKUserScript(source: "window.flutter_inappwebview={callHandler:function(name,event){window.webkit.messageHandlers.graph.postMessage(event);return Promise.resolve(null);}};", injectionTime: .atDocumentStart, forMainFrameOnly: true))
-    webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
+    webView = GraphWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
     super.init(frame: NSRect(origin: .zero, size: size))
     wantsLayer = true
     handler.host = self
@@ -87,6 +154,7 @@ private final class GraphCanvasHost: NSView, WKNavigationDelegate {
     // resetting the viewport to zero during platform-view attachment.
     webView.autoresizingMask = [.width, .height]
     webView.navigationDelegate = self
+    webView.allowsMagnification = false
     webView.setValue(false, forKey: "drawsBackground")
     addSubview(webView)
     channel.setMethodCallHandler { [weak self] call, result in
