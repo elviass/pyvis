@@ -1,9 +1,13 @@
 name: Windows packages
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      WINDOWS_PFX_BASE64:
+        required: true
+      WINDOWS_PFX_PASSWORD:
+        required: true
 
 permissions:
   contents: read
@@ -13,6 +17,13 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply release version from tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: python tools/apply_release_version.py $env:GITHUB_REF_NAME
 
       - name: Install Flutter and WiX
         shell: pwsh
@@ -30,6 +41,40 @@ jobs:
       - name: Build portable ZIP and MSI
         shell: pwsh
         run: ./tools/build_windows.ps1
+
+      - name: Sign and verify MSI
+        shell: pwsh
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (!$env:WINDOWS_PFX_BASE64 -or !$env:WINDOWS_PFX_PASSWORD) {
+            throw 'Missing the Windows test signing certificate or password.'
+          }
+          $packages = 'client/build/windows/packages'
+          $pfx = Join-Path $env:RUNNER_TEMP pyvis-test.pfx
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+            Select-Object -First 1
+          if (!$signtool) { throw 'SignTool was not found in the Windows SDK.' }
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+            $password = ConvertTo-SecureString $env:WINDOWS_PFX_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $pfx -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            $publicCert = Export-Certificate -Cert $certificate -FilePath "$packages/windows-test.cer"
+            Import-Certificate -FilePath $publicCert.FullName -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+            $msi = Get-Item "$packages/*.msi"
+            & $signtool.FullName sign /fd SHA256 /sha1 $certificate.Thumbprint $msi.FullName
+            if ($LASTEXITCODE -ne 0) { throw 'MSI signing failed.' }
+            & $signtool.FullName verify /pa /v $msi.FullName
+            if ($LASTEXITCODE -ne 0) { throw 'MSI signature verification failed.' }
+          } finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+            if ($certificate) {
+              Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue
+              Remove-Item "Cert:\LocalMachine\Root\$($certificate.Thumbprint)" -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Verify both packages
         shell: pwsh
@@ -119,4 +164,5 @@ jobs:
           path: |
             client/build/windows/packages/*.msi
             client/build/windows/packages/*-portable.zip
+            client/build/windows/packages/windows-test.cer
           if-no-files-found: error

@@ -40,6 +40,8 @@ Pyvis 是一款面向 Python 初学者和教学演示的图形化编辑器。你
 
 构建需要 Flutter 和 Python 3.12 及以上，以及相应平台的构建工具。首次构建需要下载依赖和内置运行环境。
 
+推送 `v0.1.2` 这类版本标签会启动 `Publish Pyvis release`。工作流从标签读取版本号，并用该提交的 Git 历史提交数作为统一构建号，临时写入构建机上的 `client/pubspec.yaml`。三个平台都构建成功后，工作流自动生成发布说明，并将安装包上传到 GitHub Releases。请在上一版之后的新提交上打发布标签，让构建号随发布递增。手动从分支运行单平台工作流时使用该分支的 `pubspec.yaml` 版本，安装包可从该次运行的构建产物下载。
+
 **Android**（Android SDK / NDK）
 
 ```sh
@@ -49,22 +51,23 @@ flutter build apk --release --target-platform android-arm64,android-x64
 ```
 
 产物位于 `client/build/app/outputs/flutter-apk/app-release.apk`。
+本地构建默认使用 Android 调试签名。正式分发请运行 GitHub Actions 的 `Android signed APK` 工作流，并从 `Pyvis-Android` 构建产物下载已验证签名的 APK。已有调试签名版本的设备需要先备份文稿，再卸载旧版才能安装正式签名版本。
 
 **macOS**（Xcode）
 
 ```sh
-cd client
-flutter pub get
-flutter build macos --release
+./tools/build_macos.sh
 ```
 
-产物位于 `client/build/macos/Build/Products/Release/Pyvis.app`。开发模式可在仓库根目录运行 [run_desktop.sh](tools/run_desktop.sh)。
+应用位于 `client/build/macos/Build/Products/Release/Pyvis.app`，磁盘映像位于 `client/build/macos/packages/Pyvis.dmg`。也可以运行 GitHub Actions 的 `macOS DMG` 工作流，从 `Pyvis-macOS` 构建产物下载。测试包使用 ad-hoc 签名，下载后首次打开时可能需要在「系统设置 → 隐私与安全性」确认。开发模式可在仓库根目录运行 [run_desktop.sh](tools/run_desktop.sh)。
 
 **Windows x64**（Visual Studio C++ 桌面构建工具、WiX 6）
 
 构建 MSI 需安装 WiX 6.0.2，并运行 `wix extension add -g WixToolset.UI.wixext/6.0.2`。在仓库根目录用 PowerShell 运行 `./tools/build_windows.ps1`，默认生成 MSI 和便携 ZIP。可用 `-Format MSI` 或 `-Format Portable` 只构建其中一种。两种包均内置 CPython，产物位于 `client/build/windows/packages/`。MSI 安装向导可选择为当前用户或所有用户安装、修改安装目录，以及是否创建桌面快捷方式。两种范围均添加开始菜单入口，为所有用户安装需要管理员权限。重新安装旧版 0.1.1 MSI 时，选择与原安装相同的范围可就地更新。GitHub Actions 的 `Pyvis-Windows-x64` 构建产物也提供两个文件。[Windows 打包脚本](tools/build_windows.ps1)
 
 ## 开发资料
+
+Windows 的 Actions 产物 `Pyvis-Windows-x64` 包含自签测试 MSI、公开证书 `windows-test.cer` 和便携 ZIP。测试者确认来源及证书指纹后，可以在 Windows 证书管理器信任该测试证书。便携 ZIP 和公开证书都不包含私钥。
 
 - [Flutter 客户端](client/)包含编辑器、节点画布和平台工程。[Python 内核](runtime/pyvis_runtime/)负责执行记录和代码分析。
 - [Flutter 测试](client/test/)和[内核与画布测试](tests/)覆盖基础工作流。测试截图输出到 `client/build/test-artifacts/`。

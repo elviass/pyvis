@@ -15,3 +15,9 @@ build/
 *.trace.json
 /client/test/_tmp_*.png
 /runtime/local_completion/
+
+# Release signing material
+*.jks
+*.keystore
+*.pfx
+*.p12
