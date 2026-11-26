@@ -1,0 +1,81 @@
+name: Publish Pyvis release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    uses: ./.github/workflows/android-apk.yml
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  macos:
+    uses: ./.github/workflows/macos-dmg.yml
+
+  windows:
+    uses: ./.github/workflows/windows-packages.yml
+    secrets:
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+
+  publish:
+    needs: [android, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release with all installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          prefix="Pyvis-$version"
+          mkdir -p dist
+          cp artifacts/Pyvis-Android/app-release.apk "dist/$prefix-android.apk"
+          cp artifacts/Pyvis-macOS/Pyvis.dmg "dist/$prefix-macos.dmg"
+          cp "artifacts/Pyvis-Windows-x64/$prefix-win-x64.msi" dist/
+          cp "artifacts/Pyvis-Windows-x64/$prefix-win-x64-portable.zip" dist/
+          cp artifacts/Pyvis-Windows-x64/windows-test.cer dist/
+          for asset in dist/*; do
+            test -s "$asset"
+          done
+
+          if existing=$(gh release view "$tag" --json isDraft,assets 2>/dev/null); then
+            if [[ $(jq -r '.isDraft' <<< "$existing") == true ]]; then
+              gh release upload "$tag" --clobber dist/*
+              gh release edit "$tag" --draft=false
+              exit 0
+            fi
+            for asset in dist/*; do
+              jq -e --arg name "${asset##*/}" 'any(.assets[]; .name == $name)' <<< "$existing" >/dev/null
+            done
+            echo "Release $tag is already published with all expected files."
+            exit 0
+          fi
+
+          notes=$(cat <<'EOF'
+          ## 安装
+
+          - Windows x64 · 下载 MSI 安装，或解压便携 ZIP 后运行。MSI 使用自签测试证书，`windows-test.cer` 是供测试者验证签名的公开证书。
+          - macOS · 打开 DMG，把 Pyvis 拖进「应用程序」。这是 ad-hoc 签名包，首次打开时可能需要在「系统设置 → 隐私与安全性」中确认。
+          - Android · 下载 APK 安装。如果设备装过调试签名版，请先备份文稿，再卸载旧版。
+          EOF
+          )
+          gh release create "$tag" dist/* --verify-tag --title "Pyvis $tag" --generate-notes --notes "$notes"
