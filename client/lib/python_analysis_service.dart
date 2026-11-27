@@ -63,15 +63,19 @@ class PythonAnalysisService {
         'project': project
       });
 
+  Future<Map<String, dynamic>> checkProject(Map<String, String> sources,
+          Map<String, String> sourceErrors, String project) =>
+      check(sources, null, project, sourceErrors: sourceErrors);
+
   Future<Map<String, dynamic>> check(
-          Map<String, String> sources, String entry, String project,
+          Map<String, String> sources, String? entry, String project,
           {Map<String, String> sourceErrors = const {}}) =>
       request({
-        'action': 'check',
+        'action': entry == null ? 'check_project' : 'check',
         'sources': sources,
         if (sourceErrors.isNotEmpty) 'source_errors': sourceErrors,
-        'entry': entry,
-        'project': project
+        if (entry != null) 'entry': entry,
+        'project': project,
       });
 
   Future<Map<String, dynamic>> request(Map<String, dynamic> payload) async {

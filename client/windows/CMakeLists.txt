@@ -131,6 +131,12 @@ set(INSTALL_BUNDLE_PYTHON_DIR "${CMAKE_INSTALL_PREFIX}/python")
 install(DIRECTORY "${pyvis_cpython_SOURCE_DIR}/" DESTINATION "${INSTALL_BUNDLE_PYTHON_DIR}" COMPONENT Runtime
   PATTERN "*._pth" EXCLUDE)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/python314._pth" DESTINATION "${INSTALL_BUNDLE_PYTHON_DIR}" COMPONENT Runtime)
+# ty discovers the embedded interpreter through its site-packages directory.
+# Keep a file there so both the MSI and portable ZIP retain the directory.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/site-packages-readme.txt"
+  "This directory enables ty to discover the bundled Python environment.\n")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/site-packages-readme.txt"
+  DESTINATION "${INSTALL_BUNDLE_PYTHON_DIR}/Lib/site-packages" COMPONENT Runtime)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/pyvis_runtime"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/runtime" COMPONENT Runtime
   PATTERN "__pycache__" EXCLUDE PATTERN ".DS_Store" EXCLUDE

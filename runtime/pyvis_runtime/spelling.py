@@ -33,6 +33,12 @@ def dictionary():
     return {word.lower(): frequency for word, frequency in data.items() if word.isascii()}
 
 
+@lru_cache(1)
+def _max_suggestion_word_length():
+    # A single edit can shorten a word by at most one letter.
+    return max(map(len, dictionary()), default=0) + 1
+
+
 @lru_cache(2048)
 def alternatives(word):
     words = dictionary()
@@ -47,6 +53,7 @@ def alternatives(word):
 
 def inspect_spelling(source, filename, accepted=(), tokens=None):
     words = dictionary()
+    max_word_length = _max_suggestion_word_length()
     accepted = {w.lower() for w in accepted} | _TECH
     found = []
     # Match lexical words only. URLs, escape codes, numbers, and Chinese are not
@@ -61,9 +68,11 @@ def inspect_spelling(source, filename, accepted=(), tokens=None):
         for match in re.finditer(r'[A-Za-z]+', text):
             if any(a <= match.start() < b for a,b in skip): continue
             for part in _PART.finditer(match[0]):
+                if not 3 <= part.end() - part.start() <= max_word_length:
+                    continue
                 word = part[0]
                 lower = word.lower()
-                if len(word)<3 or word.isupper() or lower in accepted or lower in words: continue
+                if word.isupper() or lower in accepted or lower in words: continue
                 guesses = alternatives(lower)
                 # Unknown domain terms without a plausible nearby English
                 # spelling are left alone rather than inventing a correction.

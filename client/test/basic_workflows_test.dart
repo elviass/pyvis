@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
@@ -18,13 +19,17 @@ class LocalPicker extends FilePicker {
   final String directory;
   String? savePath;
   String? pickPath;
+  Completer<String?>? pendingDirectory;
+  Completer<FilePickerResult?>? pendingFiles;
   LocalPicker(this.directory);
   @override
   Future<String?> getDirectoryPath(
           {String? dialogTitle,
           bool lockParentWindow = false,
-          String? initialDirectory}) async =>
-      directory;
+          String? initialDirectory}) async {
+    final pending = pendingDirectory;
+    return pending == null ? directory : await pending.future;
+  }
   @override
   Future<FilePickerResult?> pickFiles(
       {String? dialogTitle,
@@ -39,6 +44,8 @@ class LocalPicker extends FilePicker {
       bool withReadStream = false,
       bool lockParentWindow = false,
       bool readSequential = false}) async {
+    final pending = pendingFiles;
+    if (pending != null) return pending.future;
     if (pickPath == null) return null;
     final file = File(pickPath!);
     return FilePickerResult([
@@ -130,6 +137,41 @@ Future<Directory> openFixture(WidgetTester tester, Map<String, String> files,
 }
 
 void main() {
+  testWidgets('project picker can return after editor closes', (tester) async {
+    final directory = await openFixture(tester, {'main.py': 'print(7)\n'});
+    final picker = FilePicker.platform as LocalPicker;
+    final selection = picker.pendingDirectory = Completer<String?>();
+    await tester.tap(find.byTooltip('打开项目').last);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    selection.complete(directory.path);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('trace picker can return after editor closes', (tester) async {
+    const archive = '{"version":1,"events":[],"sources":{}}';
+    final directory = await openFixture(tester, {
+      'main.py': 'print(7)\n',
+      'session.trace.json': archive,
+    });
+    final picker = FilePicker.platform as LocalPicker;
+    final selection = picker.pendingFiles = Completer<FilePickerResult?>();
+    await tester.tap(find.byTooltip('更多操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开执行记录'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    selection.complete(FilePickerResult([
+      PlatformFile(
+          name: 'session.trace.json',
+          size: archive.length,
+          path: '${directory.path}/session.trace.json'),
+    ]));
+    await realIo(tester, () async {});
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('closing the last tab offers recent files and reopens the source',
       (tester) async {
     await openFixture(tester, {'main.py': 'print(7)\n'});
@@ -407,21 +449,29 @@ void main() {
 
   testWidgets('real input reaches Python and stop works while awaiting input',
       (tester) async {
-    await openFixture(
-        tester, {'main.py': 'name=input("你的名字：")\nprint("你好", name)\n'});
+    await openFixture(tester, {
+      'main.py': 'import os\n'
+          'os.write(2, b"native diagnostic\\n")\n'
+          'name=input("你的名字：")\nprint("你好", name)\n'
+    });
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
     await waitForRealIo(tester, find.text('你的名字：'));
+    expect(find.textContaining('native diagnostic', findRichText: true),
+        findsWidgets);
+    expect(find.textContaining('运行环境错误'), findsNothing);
     final field = find.byType(TextField);
     await tester.enterText(field, '小林');
     await realIo(tester, () async {
       await tester.testTextInput.receiveAction(TextInputAction.done);
     });
     expect(find.textContaining('你好 小林'), findsWidgets);
+    expect(find.byTooltip('停止运行'), findsNothing);
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    await waitForRealIo(tester, find.text('你的名字：'));
     await tester.tap(find.byTooltip('停止运行'));
     await tester.pumpAndSettle();
     expect(find.textContaining('运行已停止'), findsOneWidget);
@@ -433,15 +483,22 @@ void main() {
   testWidgets('multi-file entry executes imports and reports a Python error',
       (tester) async {
     await openFixture(tester, {
-      'main.py': 'from helper import double\nprint(double(4))\nprint(1/0)\n',
+      'main.py': 'import os\nfrom helper import double\n'
+          'os.write(2, b"native diagnostic\\n")\n'
+          'print(double(4))\nprint(1/0)\n',
       'helper.py': 'def double(x):\n    return x*2\n'
     });
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('直接运行').first);
     });
+    final error = find.textContaining('ZeroDivisionError', findRichText: true);
+    for (var i = 0; i < 10 && error.evaluate().isEmpty; i++) {
+      await realIo(tester, () async {});
+    }
     expect(find.byType(ComfyBlueprintPanel), findsNothing);
     expect(find.byKey(const ValueKey('independent-console')), findsOneWidget);
     expect(find.textContaining('ZeroDivisionError'), findsWidgets);
+    expect(find.byTooltip('停止运行'), findsNothing);
     await tester.tap(find.text('代码流程图'));
     await tester.pumpAndSettle();
     final theater = tester.widget<LineTheater>(find.byType(LineTheater));
@@ -454,6 +511,27 @@ void main() {
             .map((e) => e['text'])
             .join(),
         '8\n');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a worker exiting without a finished event still reports failure',
+      (tester) async {
+    await openFixture(tester, {
+      'main.py': 'import os\n'
+          'os.write(2, b"worker diagnostic\\n")\n'
+          'os._exit(7)\n',
+    });
+    await realIo(tester, () => tester.tap(find.byTooltip('直接运行').first));
+    final diagnostic = find.textContaining('运行进程意外退出（7）',
+        findRichText: true);
+    for (var i = 0; i < 10 && diagnostic.evaluate().isEmpty; i++) {
+      await realIo(tester, () async {});
+    }
+    expect(diagnostic, findsWidgets);
+    expect(find.textContaining('worker diagnostic', findRichText: true),
+        findsWidgets);
+    expect(find.byTooltip('停止运行'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -693,48 +771,126 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets(
-      'record export/import replays the saved run without executing modified code',
+  testWidgets('a legacy v1 recording replays and survives an oversized import',
       (tester) async {
+    final legacy = File('test/fixtures/iteration_trace.json').readAsStringSync();
+    final expected = decodeTrace(legacy)['events'] as List;
     final directory = await openFixture(tester, {
-      'main.py': 'import random\nvalue=random.randint(1,10000)\nprint(value)\n'
+      'main.py': 'raise RuntimeError("must not rerun")\n',
+      'legacy.trace.json': legacy,
     });
-    await realIo(tester, () async {
-      await tester.tap(find.byTooltip('直接运行').first);
-    });
-    await tester.tap(find.text('代码流程图'));
+    Future<void> openTrace(String name) async {
+      (FilePicker.platform as LocalPicker).pickPath = '${directory.path}/$name';
+      await tester.tap(find.byTooltip('更多操作'));
+      await tester.pumpAndSettle();
+      await realIo(tester, () => tester.tap(find.text('打开执行记录')));
+    }
+
+    await openTrace('legacy.trace.json');
+    final step = expected.indexWhere((event) => event['kind'] == 'statement');
+    final timeline = find.byType(Slider);
+    await waitForRealIo(tester, timeline);
+    tester.widget<Slider>(timeline).onChanged!(0);
     await tester.pumpAndSettle();
-    final original =
-        tester.widget<LineTheater>(find.byType(LineTheater)).events;
-    final picker = FilePicker.platform as LocalPicker;
-    picker.savePath = '${directory.path}/session.trace.json';
-    await tester.tap(find.byTooltip('更多操作'));
+    final theater = find.byType(LineTheater);
+    expect(tester.widget<LineTheater>(theater).events, expected);
+    expect(tester.widget<LineTheater>(theater).event['seq'], step);
+    expect(find.textContaining('must not rerun', findRichText: true),
+        findsNothing);
+
+    final file = File('${directory.path}/large.trace.json')
+        .openSync(mode: FileMode.write);
+    try {
+      file.truncateSync(maxTraceFileBytes + 1);
+    } finally {
+      file.closeSync();
+    }
+    await openTrace('large.trace.json');
+    await waitForRealIo(tester, find.text('无法打开记录：执行记录文件超过 64 MiB 上限'));
+    expect(tester.widget<LineTheater>(theater).events, expected);
+    expect(tester.widget<LineTheater>(theater).event['seq'], step);
+    await tester.tap(find.byTooltip('控制台').last);
     await tester.pumpAndSettle();
-    await realIo(tester, () async {
-      await tester.tap(find.text('保存执行记录'));
-    });
-    await tester.runAsync(() async {
-      decodeTrace(await File(picker.savePath!).readAsString());
-      await File('${directory.path}/main.py')
-          .writeAsString('raise RuntimeError("must not rerun")\n');
-    });
-    picker.pickPath = picker.savePath;
-    await tester.tap(find.byTooltip('更多操作'));
-    await tester.pumpAndSettle();
-    await realIo(tester, () async {
-      await tester.tap(find.text('打开执行记录'));
-    });
-    tester
-        .widget<Slider>(find.byType(Slider).first)
-        .onChanged!((original.length - 1).toDouble());
-    await tester.pumpAndSettle();
-    expect(
-        jsonEncode(tester.widget<LineTheater>(find.byType(LineTheater)).events),
-        jsonEncode(original));
-    expect(find.textContaining('must not rerun'), findsNothing);
+    expect(find.text('1\n', findRichText: true), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final stopped in [false, true]) {
+    testWidgets(
+        'record export/import replays the ${stopped ? 'stopped' : 'completed'} run',
+        (tester) async {
+      const helper = 'def value():\n    return 7\n';
+      final directory = await openFixture(tester, {
+        'main.py': 'from helper import value\n'
+            'if False:\n    import never_loaded\n'
+            'print(value())\n'
+            '${stopped ? "input('继续？')\n" : ""}',
+        'helper.py': helper,
+        'never_loaded.py': 'not_executed = 1\n',
+        'unused.py': 'not_imported = 2\n'
+      });
+      await realIo(tester, () async {
+        await tester.tap(find.byTooltip('直接运行').first);
+      });
+      if (stopped) {
+        await waitForRealIo(tester, find.byTooltip('提交输入'));
+        await tester.tap(find.byTooltip('停止运行').first);
+        await tester.pumpAndSettle();
+      } else {
+        await waitForRealIo(tester, find.text('7\n', findRichText: true));
+        for (var i = 0;
+            i < 10 && find.byTooltip('停止运行').evaluate().isNotEmpty;
+            i++) {
+          await realIo(tester, () async {});
+        }
+        expect(find.byTooltip('停止运行'), findsNothing);
+      }
+      await tester.tap(find.text('代码流程图'));
+      await tester.pumpAndSettle();
+      final original =
+          tester.widget<LineTheater>(find.byType(LineTheater)).events;
+      final picker = FilePicker.platform as LocalPicker;
+      picker.savePath = '${directory.path}/session.trace.json';
+      await tester.tap(find.byTooltip('更多操作'));
+      await tester.pumpAndSettle();
+      await realIo(tester, () async {
+        await tester.tap(find.text('保存执行记录'));
+      });
+      await tester.runAsync(() async {
+        final text = await File(picker.savePath!).readAsString();
+        expect((jsonDecode(text) as Map)['version'], 2);
+        final archive = decodeTrace(text);
+        final captured = archive['sources'] as Map<String, dynamic>;
+        expect(captured.keys.map((path) => File(path).uri.pathSegments.last),
+            unorderedEquals(['main.py', 'helper.py']));
+        expect(captured.values, contains(helper));
+        await File('${directory.path}/main.py')
+            .writeAsString('raise RuntimeError("must not rerun")\n');
+        await File('${directory.path}/helper.py').delete();
+      });
+      picker.pickPath = picker.savePath;
+      await tester.tap(find.text('编辑代码'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Slider), findsNothing);
+      await tester.tap(find.byTooltip('更多操作'));
+      await tester.pumpAndSettle();
+      await realIo(tester, () async {
+        await tester.tap(find.text('打开执行记录'));
+      });
+      await waitForRealIo(tester, find.byType(Slider));
+      final timeline = tester.widget<Slider>(find.byType(Slider));
+      timeline.onChanged!(timeline.max);
+      await tester.pumpAndSettle();
+      expect(
+          jsonEncode(
+              tester.widget<LineTheater>(find.byType(LineTheater)).events),
+          jsonEncode(original));
+      expect(find.textContaining('must not rerun'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   test('malformed archives are rejected before replacing the active recording',
       () {
@@ -760,5 +916,26 @@ void main() {
     final item = valid['events'] as List<Map<String, Object>>;
     item.single['next_line'] = '2';
     expect(() => decodeTrace(jsonEncode(valid)), throwsFormatException);
+  });
+
+  test('archive structure limits have specific error messages', () {
+    void expectLimit(List<Object?> events, String message) {
+      final archive = jsonEncode({'version': 1, 'events': events, 'sources': {}});
+      expect(
+          () => decodeTrace(archive),
+          throwsA(
+              isA<FormatException>().having((e) => e.message, 'message', message)));
+    }
+
+    expectLimit(List.filled(50001, null), '执行记录超过 50000 个事件的上限');
+    expectLimit([
+      {
+        'seq': 0,
+        'kind': 'line',
+        'frames': [],
+        'values': [],
+        'heap': {for (var id = 0; id <= 1000; id++) 'o$id': {'type': 'list'}},
+      },
+    ], '单步快照超过 1000 个对象的上限');
   });
 }

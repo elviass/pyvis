@@ -145,7 +145,8 @@ class EditorDecorations extends CodeParagraphDecorator {
   final VoidCallback? onHoverExit;
   Map analysis = {};
   List<Map<String, dynamic>> diagnostics = [];
-  InlineCodeSuggestion? ghost;
+  InlineCodeSuggestion? _ghost;
+  _GhostLayout? _ghostLayout;
   InlineCodeSuggestion? _modelGhost;
   bool modelMode = false;
   List<List<int>> activeBrackets = [];
@@ -154,6 +155,24 @@ class EditorDecorations extends CodeParagraphDecorator {
     editor.addListener(_changed);
     focus.addListener(_changed);
   }
+
+  InlineCodeSuggestion? get ghost => _ghost;
+  set ghost(InlineCodeSuggestion? value) {
+    if (value?.suffix != _ghost?.suffix) {
+      _ghostLayout?.dispose();
+      _ghostLayout = null;
+    }
+    _ghost = value;
+  }
+
+  _GhostLayout? _layoutGhost(_GhostLayoutKey key) {
+    if (ghost?.suffix != key.text) return null;
+    final current = _ghostLayout;
+    if (current != null && current.key == key) return current;
+    current?.dispose();
+    return _ghostLayout = _GhostLayout(key);
+  }
+
   String get _position =>
       '${editor.text}\u0000${editor.selection.extentIndex}:${editor.selection.extentOffset}';
   void setAnalysis(Map data, String source, List<Map<String, dynamic>> issues) {
@@ -306,7 +325,7 @@ class EditorDecorations extends CodeParagraphDecorator {
   IParagraph decorate(
       int index, IParagraph paragraph, TextStyle style, double maxWidth) {
     final line = editor.index2lineIndex(index);
-    final source = editor.text.split('\n')[line];
+    final source = editor.codeLines[index].text;
     final issues = diagnostics
         .where((d) =>
             d['line'] <= line + 1 && (d['end_line'] ?? d['line']) >= line + 1)
@@ -331,11 +350,14 @@ class EditorDecorations extends CodeParagraphDecorator {
     if (issues.isEmpty && inline == null && brackets.isEmpty && indent == 0) {
       return paragraph;
     }
-    return DecoratedCodeParagraph(paragraph, source, style, maxWidth,
+    return _DecoratedCodeParagraph(paragraph, source, style,
         issues: issues,
         bracketOffsets: brackets,
         indentColumns: indent,
-        ghostText: inline,
+        layoutGhost: inline == null
+            ? null
+            : (start) => _layoutGhost(
+                (text: inline, style: style, maxWidth: maxWidth, start: start)),
         onHover: onHover,
         onHoverExit: onHoverExit);
   }
@@ -344,58 +366,102 @@ class EditorDecorations extends CodeParagraphDecorator {
   void dispose() {
     editor.removeListener(_changed);
     focus.removeListener(_changed);
+    ghost = null;
     super.dispose();
   }
 }
 
-class DecoratedCodeParagraph implements IParagraph {
+typedef _GhostLayoutKey = ({
+  String text,
+  TextStyle style,
+  double maxWidth,
+  double start,
+});
+
+/// The editor owns at most one preview layout, even when the viewport rebuilds.
+class _GhostLayout {
+  final _GhostLayoutKey key;
+  final _lines = <TextPainter>[];
+  final _tip = TextPainter(
+      text: const TextSpan(
+          text: 'Tab 以补全',
+          style: TextStyle(color: Color(0xff9398a4), fontSize: 11)),
+      textDirection: TextDirection.ltr)
+    ..layout();
+  double width = 0, height = 0;
+
+  _GhostLayout(this.key) {
+    final style = key.style.copyWith(color: const Color(0xff777b84));
+    final lines = key.text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      final left = i == 0 ? key.start : 0.0;
+      final painter = TextPainter(
+          text: TextSpan(text: lines[i].isEmpty ? ' ' : lines[i], style: style),
+          textDirection: TextDirection.ltr)
+        ..layout(
+            maxWidth: key.maxWidth.isFinite
+                ? math.max(40, key.maxWidth - left)
+                : double.infinity);
+      _lines.add(painter);
+      width = math.max(width, painter.width + left);
+      height += painter.height;
+    }
+  }
+
+  void draw(Canvas canvas, Offset offset) {
+    var y = 0.0;
+    for (var i = 0; i < _lines.length; i++) {
+      final line = _lines[i];
+      line.paint(canvas, offset + Offset(i == 0 ? key.start : 0, y));
+      y += line.height;
+    }
+    final last = _lines.last;
+    _tip.paint(
+        canvas,
+        offset +
+            Offset((_lines.length == 1 ? key.start : 0) + last.width + 12,
+                y - last.height + 3));
+  }
+
+  void dispose() {
+    for (final line in _lines) {
+      line.dispose();
+    }
+    _tip.dispose();
+  }
+}
+
+class _DecoratedCodeParagraph implements IParagraph {
   final IParagraph base;
   final String source;
   final List<Map<String, dynamic>> issues;
-  final String? ghostText;
+  final _GhostLayout? Function(double start)? _layoutGhost;
   final List<int> bracketOffsets;
   final int indentColumns;
   late final double _spaceWidth;
   final void Function(Map<String, dynamic>, Rect)? onHover;
   final VoidCallback? onHoverExit;
-  final List<TextPainter> _ghostPainters = [];
   final Map<InlineSpan, TextRange> _spans = {};
   late final Offset _end;
-  double _extraHeight = 0, _width = 0;
-  DecoratedCodeParagraph(
-      this.base, this.source, TextStyle style, double maxWidth,
+  late final double _extraHeight, _width;
+  _DecoratedCodeParagraph(this.base, this.source, TextStyle style,
       {this.issues = const [],
       this.bracketOffsets = const [],
       this.indentColumns = 0,
-      this.ghostText,
+      _GhostLayout? Function(double start)? layoutGhost,
       this.onHover,
-      this.onHoverExit}) {
+      this.onHoverExit})
+      : _layoutGhost = layoutGhost {
     _end = base.getOffset(TextPosition(offset: source.length)) ?? Offset.zero;
-    _width = base.width;
+    final preview = _layoutGhost?.call(_end.dx);
+    _width = math.max(base.width, preview?.width ?? 0);
+    _extraHeight = math.max(0, (preview?.height ?? 0) - base.preferredLineHeight);
     final space = TextPainter(
         text: TextSpan(text: ' ', style: style),
         textDirection: TextDirection.ltr)
       ..layout();
     _spaceWidth = space.width;
     space.dispose();
-    if (ghostText != null) {
-      final pieces = ghostText!.split('\n');
-      for (var i = 0; i < pieces.length; i++) {
-        final painter = TextPainter(
-            text: TextSpan(
-                text: pieces[i].isEmpty ? ' ' : pieces[i],
-                style: style.copyWith(color: const Color(0xff777b84))),
-            textDirection: TextDirection.ltr)
-          ..layout(
-              maxWidth: maxWidth.isFinite
-                  ? math.max(40, maxWidth - (i == 0 ? _end.dx : 0))
-                  : double.infinity);
-        _ghostPainters.add(painter);
-        _width = math.max(_width, painter.width + (i == 0 ? _end.dx : 0));
-        _extraHeight += painter.height;
-      }
-      _extraHeight = math.max(0, _extraHeight - base.preferredLineHeight);
-    }
     for (final issue in issues) {
       final range = issueRange(issue);
       final span = MouseTrackerAnnotationTextSpan(
@@ -558,29 +624,7 @@ class DecoratedCodeParagraph implements IParagraph {
         }
       }
     }
-    var y = _end.dy;
-    for (var i = 0; i < _ghostPainters.length; i++) {
-      final painter = _ghostPainters[i];
-      painter.paint(canvas, offset + Offset(i == 0 ? _end.dx : 0, y));
-      y += painter.height;
-    }
-    if (_ghostPainters.isNotEmpty) {
-      final last = _ghostPainters.last;
-      final tip = TextPainter(
-          text: const TextSpan(
-              text: 'Tab 以补全',
-              style: TextStyle(color: Color(0xff9398a4), fontSize: 11)),
-          textDirection: TextDirection.ltr)
-        ..layout();
-      tip.paint(
-          canvas,
-          offset +
-              Offset(
-                  ((_ghostPainters.length == 1) ? _end.dx : 0) +
-                      last.width +
-                      12,
-                  y - last.height + 3));
-    }
+    _layoutGhost?.call(_end.dx)?.draw(canvas, offset + Offset(0, _end.dy));
   }
 }
 

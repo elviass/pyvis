@@ -4,13 +4,29 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pyvis_runtime.code_intelligence import analyze, compile_check
-from pyvis_runtime.editor_tools import VENDOR, format_source, inspect_source, type_check
+from pyvis_runtime.editor_tools import VENDOR, executable, format_source, inspect_source, type_check
 from pyvis_runtime.semantic_analysis import complete, symbol_info
 
 
 class EditorToolsTests(unittest.TestCase):
+    def test_x64_tools_are_available_to_emulated_python_on_windows_arm(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            with (
+                patch('pyvis_runtime.editor_tools.sys.platform', 'win32'),
+                patch('pyvis_runtime.editor_tools.sysconfig.get_platform', return_value='win-amd64'),
+                patch('pyvis_runtime.editor_tools.platform.machine', return_value='ARM64'),
+                patch.object(Path, 'home', return_value=home),
+            ):
+                for tool in ('ruff', 'ty'):
+                    with self.subTest(tool=tool):
+                        binary = Path(executable(tool))
+                        self.assertEqual(binary.name, tool + '.exe')
+                        self.assertTrue(binary.is_file())
+
     def test_offline_mac_and_windows_resources_match_manifest(self):
         records = json.loads((VENDOR / 'manifest.json').read_text())
         self.assertEqual(len(records), 6)

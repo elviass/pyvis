@@ -1,9 +1,34 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <shlobj.h>
+
+#include <string>
 
 #include "flutter_window.h"
 #include "utils.h"
+
+namespace {
+
+void ConfigureWebViewUserDataFolder() {
+  constexpr wchar_t variable[] = L"WEBVIEW2_USER_DATA_FOLDER";
+  if (::GetEnvironmentVariableW(variable, nullptr, 0) != 0) {
+    return;
+  }
+
+  // MSI installs may run from Program Files, where a standard user cannot
+  // create WebView2's default data folder next to the executable.
+  PWSTR local_app_data = nullptr;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr,
+                                       &local_app_data))) {
+    const std::wstring folder =
+        std::wstring(local_app_data) + L"\\Pyvis\\WebView2";
+    ::SetEnvironmentVariableW(variable, folder.c_str());
+  }
+  ::CoTaskMemFree(local_app_data);
+}
+
+}  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -16,6 +41,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  ConfigureWebViewUserDataFolder();
 
   flutter::DartProject project(L"data");
 

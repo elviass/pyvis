@@ -1,13 +1,96 @@
 import json
 import os
 from pathlib import Path
+from queue import Queue
 import subprocess
 import sys
 import tempfile
+from threading import Thread
 import unittest
 
 
 class WorkerTests(unittest.TestCase):
+    def test_request_workers_reject_invalid_messages_and_keep_serving(self):
+        root = Path(__file__).resolve().parents[1]
+        invalid = ['', '[]', '"text"', 'null', '42', 'true', '{']
+        requests = {
+            'code_intelligence': (
+                {'id': 'missing', 'action': 'decode_source'},
+                {'id': 'valid', 'action': 'decode_source', 'data': 'cHJpbnQoMSkK'},
+                'source',
+            ),
+            'blueprint': (
+                {'id': 'missing'},
+                {'id': 'valid', 'source': 'answer = 42\n'},
+                'graph',
+            ),
+        }
+        for module, (missing, valid, result_key) in requests.items():
+            with self.subTest(module=module):
+                lines = [*invalid, json.dumps(missing), json.dumps(valid), '']
+                result = subprocess.run(
+                    [sys.executable, '-u', '-m', f'pyvis_runtime.{module}'],
+                    input='\n'.join(lines), capture_output=True, encoding='utf-8',
+                    check=True, timeout=10,
+                    env={**os.environ, 'PYTHONPATH': str(root / 'runtime'),
+                         'PYTHONIOENCODING': 'utf-8'})
+                replies = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(len(replies), len(invalid) + 2)
+                for reply in replies[:len(invalid)]:
+                    self.assertIsNone(reply['id'])
+                    self.assertIn('error', reply)
+                self.assertEqual(replies[-2]['id'], 'missing')
+                self.assertIn('error', replies[-2])
+                self.assertEqual(replies[-1]['id'], 'valid')
+                self.assertIn(result_key, replies[-1])
+                self.assertEqual(result.stderr, '')
+
+    def test_run_commands_keep_accepting_input_and_stop_after_invalid_messages(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            entry = Path(folder) / 'main.py'
+            entry.write_text("print(input('first'), flush=True)\ninput('second')\n")
+            with subprocess.Popen(
+                [sys.executable, '-u', '-m', 'pyvis_runtime', str(entry), '--worker'],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding='utf-8',
+                env={**os.environ, 'PYTHONPATH': str(root / 'runtime'),
+                     'PYTHONIOENCODING': 'utf-8'},
+            ) as process:
+                lines = Queue()
+
+                def read_events():
+                    for line in process.stdout:
+                        lines.put(line)
+
+                def until(kind):
+                    events = []
+                    while True:
+                        event = json.loads(lines.get(timeout=5))
+                        events.append(event)
+                        if event['kind'] == kind:
+                            return events
+
+                reader = Thread(target=read_events, daemon=True)
+                reader.start()
+                try:
+                    self.assertEqual(until('input_request')[-1]['prompt'], 'first')
+                    process.stdin.write('[]\nnull\n{\n{"action":"input","text":"OK"}\n')
+                    process.stdin.flush()
+                    events = until('input_request')
+                    self.assertEqual(events[-1]['prompt'], 'second')
+                    self.assertEqual(sum(e['kind'] == 'protocol_error' for e in events), 3)
+                    self.assertEqual(''.join(e['text'] for e in events if e['kind'] == 'output'), 'OK\n')
+                    process.stdin.write('{"action":"stop"}\n')
+                    process.stdin.flush()
+                    self.assertEqual(until('finished')[-1]['error']['type'], 'KeyboardInterrupt')
+                    self.assertEqual(process.wait(timeout=5), 0)
+                    self.assertEqual(process.stderr.read(), '')
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    reader.join(timeout=5)
+
     def test_compact_heap_reuses_only_the_previous_snapshot(self):
         from pyvis_runtime.__main__ import HeapDelta
 
@@ -15,6 +98,9 @@ class WorkerTests(unittest.TestCase):
         before = {'heap': {'o1': {'type': 'list', 'items': []}}}
         after = {'heap': {'o1': {'type': 'list', 'items': [{'type': 'int', 'value': 1}]}}}
         self.assertEqual(delta.event(before), before)
+        output = {'kind': 'output', 'heap': {}, 'text': 'hi\n'}
+        self.assertEqual(delta.event(output), output)
+        self.assertEqual(delta.event(before), {'heap': {'o1': None}})
         self.assertEqual(delta.event({**after, 'before': before}),
                          {**after, 'before': {'heap': {'o1': None}}})
         self.assertEqual(delta.event(after), {'heap': {'o1': None}})
@@ -45,8 +131,11 @@ class WorkerTests(unittest.TestCase):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, env={**os.environ, 'PYTHONPATH': str(root/'runtime')})
         try:
+            source = json.loads(process.stdout.readline())
             call = json.loads(process.stdout.readline())
             first = json.loads(process.stdout.readline())
+            self.assertEqual(source['kind'], 'source')
+            self.assertEqual(source['file'], call['file'])
             self.assertEqual(call['kind'], 'call')
             self.assertEqual(first['kind'], 'line')
             process.stdin.write('{"action":"step"}\n'); process.stdin.flush()
@@ -62,6 +151,7 @@ class WorkerTests(unittest.TestCase):
             events = [json.loads(line) for line in rest.splitlines()]
             self.assertEqual(events[-1]['kind'], 'finished')
             self.assertEqual(events[-1]['error']['type'], 'KeyboardInterrupt')
+            self.assertNotIn('sources', events[-1])
             self.assertEqual(stderr, '')
         finally:
             if process.poll() is None: process.kill()

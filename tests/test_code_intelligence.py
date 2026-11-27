@@ -1,6 +1,7 @@
 import contextlib
 import io
 import unittest
+from unittest.mock import patch
 from pyvis_runtime.code_intelligence import analyze, check_sources
 
 
@@ -31,6 +32,15 @@ class IntelligenceTests(unittest.TestCase):
         result = check_sources(sources, '/p/main.py', '/p')
         self.assertEqual([d['file'] for d in result['diagnostics']], ['/p/helper.py'])
         self.assertNotIn('/p/unused.py', result['checked'])
+
+    def test_project_check_returns_dependency_paths_to_the_client(self):
+        with patch('pathlib.Path.read_bytes', side_effect=AssertionError('unexpected read')):
+            entry = check_sources({'/p/main.py': 'import helper\n'}, project='/p', discover_imports=True)
+            helper = check_sources({'/p/helper.py': 'if True\n    pass\n'},
+                                   project='/p', discover_imports=True)
+        self.assertEqual(entry['checked'], ['/p/main.py'])
+        self.assertEqual(entry['dependencies'], ['/p/helper.py', '/p/helper/__init__.py'])
+        self.assertEqual([d['file'] for d in helper['diagnostics']], ['/p/helper.py'])
 
     def test_package_relative_import_and_import_cycle_remain_finite(self):
         sources = {'/p/main.py': 'from pkg import helper', '/p/pkg/__init__.py': '',

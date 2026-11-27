@@ -11,6 +11,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -29,10 +30,12 @@ def executable(name):
         if not binary.is_file():
             raise RuntimeError(f'应用内缺少已签名的 {name} 分析组件')
         return str(binary)
-    machine = platform.machine().lower()
     if sys.platform == 'darwin':
+        machine = platform.machine().lower()
         tag = 'macosx_11_0_arm64' if machine in ('arm64', 'aarch64') else 'macosx_10_12_x86_64'
-    elif sys.platform == 'win32' and machine in ('amd64', 'x86_64'):
+    # Windows on ARM can run the x64 package under emulation. Pick the
+    # wheel for the running Python, even when WMI reports an ARM64 host.
+    elif sys.platform == 'win32' and sysconfig.get_platform() == 'win-amd64':
         tag = 'win_amd64'
     else:
         raise RuntimeError(f'此平台尚未打包 {name} 分析组件')

@@ -7,6 +7,7 @@
   const canvas = new LGraphCanvas(element, graph, { autoresize: false, skip_render: true });
   let payload, scene, updating = false, selected, signature, geometryKey;
   let awaitingFrame = false, viewportSize, resizeFrame, failureMessage;
+  let windowsTrackpad;
   const nodeMap = new Map(), memories = new Map();
   const linkSpecs = new WeakMap(), highlightedWires = new Set();
   const routing = window.PyvisRouting, hint = document.getElementById('hint');
@@ -498,8 +499,58 @@
   };
   document.getElementById('selection-action').onclick = () => { if (selectedSpec) activate(selectedSpec); };
   document.getElementById('close-inspector').onclick = clearSelection;
+  function zoomAt(anchor, center, target) {
+    const scale = Math.max(canvas.ds.min_scale, Math.min(canvas.ds.max_scale, target));
+    canvas.ds.scale = scale;
+    canvas.ds.offset = [center[0] / scale - anchor[0], center[1] / scale - anchor[1]];
+    canvas.ds.onChanged(scale);
+    canvas.setDirty(true, true);
+  }
+  function trackpadPoint(x, y) {
+    if (!scene || !viewportSize) return;
+    const rect = element.getBoundingClientRect();
+    if (!(x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)) return;
+    if (document.elementFromPoint(x, y) === element) return [x - rect.left, y - rect.top];
+  }
+  function zoomTrackpad(x, y, factor) {
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const point = trackpadPoint(x, y);
+    if (point) zoomAt(canvas.ds.convertCanvasToOffset(point), point, canvas.ds.scale * factor);
+  }
+  function scrollPanel(target) {
+    return target?.closest?.('#inspector, #legend-panel, .litecontextmenu');
+  }
+  function panTrackpad(x, y, dx, dy) {
+    if (![x, y, dx, dy].every(Number.isFinite)) return;
+    if (!trackpadPoint(x, y)) {
+      scrollPanel(document.elementFromPoint(x, y))?.scrollBy(-dx, -dy);
+      return;
+    }
+    canvas.ds.offset[0] += dx / canvas.ds.scale;
+    canvas.ds.offset[1] += dy / canvas.ds.scale;
+    scheduleRoutes();
+    canvas.setDirty(true, true);
+  }
+  function beginWindowsTrackpad() {
+    windowsTrackpad = { key: payload?.key, scale: canvas.ds.scale, offset: [...canvas.ds.offset] };
+  }
+  function zoomWindowsTrackpad(x, y, factor) {
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const point = trackpadPoint(x, y);
+    if (!point) return;
+    if (!windowsTrackpad || windowsTrackpad.key !== payload.key) beginWindowsTrackpad();
+    const { scale, offset } = windowsTrackpad;
+    zoomAt([point[0] / scale - offset[0], point[1] / scale - offset[1]], point, scale * factor);
+  }
+  function endWindowsTrackpad() { windowsTrackpad = null; }
+  element.parentElement.addEventListener('wheel', event => {
+    // WebView2 also receives a wheel event for each trackpad pan update.
+    if (!windowsTrackpad || event.target !== element && !scrollPanel(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, { capture: true, passive: false });
   installGraphTouch(element, {
-    enabled: () => payload?.manualCamera,
+    enabled: () => Boolean(scene),
     scale: () => canvas.ds.scale,
     world: point => canvas.ds.convertCanvasToOffset(point),
     hit(point) {
@@ -516,13 +567,7 @@
       canvas.setDirty(true, true);
     },
     endMove(hit) { canvas.onNodeMoved(hit.node); },
-    zoom(anchor, center, target) {
-      const scale = Math.max(canvas.ds.min_scale, Math.min(canvas.ds.max_scale, target));
-      canvas.ds.scale = scale;
-      canvas.ds.offset = [center[0] / scale - anchor[0], center[1] / scale - anchor[1]];
-      canvas.ds.onChanged(scale);
-      canvas.setDirty(true, true);
-    },
+    zoom: zoomAt,
     tap(hit, point) {
       if (!hit) { clearSelection(); return; }
       const [x, y] = canvas.ds.convertCanvasToOffset(point);
@@ -711,7 +756,8 @@
   window.addEventListener('resize', () => {
     if (resizeFrame == null) resizeFrame = requestAnimationFrame(resizeCanvas);
   });
-  window.PyvisCanvas = { receive, command, snapshot: () => ({ ...state(),
+  window.PyvisCanvas = { receive, command, zoomTrackpad, panTrackpad, beginWindowsTrackpad,
+    zoomWindowsTrackpad, endWindowsTrackpad, snapshot: () => ({ ...state(),
     nodes: scene?.nodes.map(n => ({ id: n.id, line: n.line, kind: n.kind,
       caption: n.presentation.caption })), links: scene?.links.length }) };
   bridge('ready');

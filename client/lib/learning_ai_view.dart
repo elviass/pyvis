@@ -707,6 +707,8 @@ typedef LearningReference = ({String label, Future<String> Function() read});
 
 class LearningAiPanel extends StatefulWidget {
   final Map<String, String> available;
+  final bool warnBeforeSharingContext;
+  final Future<void> Function()? onHideContextWarning;
   final List<AiMessage> messages;
   final AiConfigStore? store;
   final bool inEditor;
@@ -720,6 +722,8 @@ class LearningAiPanel extends StatefulWidget {
       {super.key,
       required this.available,
       required this.messages,
+      this.warnBeforeSharingContext = true,
+      this.onHideContextWarning,
       this.store,
       this.inEditor = false,
       this.onChatsChanged,
@@ -759,10 +763,65 @@ class LearningAiPanelState extends State<LearningAiPanel> {
   final promptMenu = GlobalKey<PopupMenuButtonState<String>>();
   final scroll = ScrollController();
   final selected = <String>{};
+  bool _hideContextWarning = false;
   final references = <String, String>{};
   String? referenceQuery;
   String? referenceError;
   bool readingReference = false;
+
+  Future<void> selectContext(String name, bool checked) async {
+    if (!checked) {
+      setState(() => selected.remove(name));
+      return;
+    }
+    final content = widget.available[name];
+    if (content == null) return;
+    var hideWarning = false;
+    if (widget.warnBeforeSharingContext && !_hideContextWarning) {
+      final detail = switch (name) {
+        '当前演示步骤' => '其中可能包含运行时变量值、调用帧和对象数据。',
+        '当前错误' => '其中可能包含完整错误堆栈、文件路径和异常消息。',
+        _ => '请确认其中没有你不愿分享的内容。',
+      };
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('附带上下文？'),
+            scrollable: true,
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('点击「发送」时，「$name」将发给当前选择的模型服务。$detail'),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('不再显示此提示'),
+                value: hideWarning,
+                onChanged: (value) => update(() => hideWarning = value == true),
+              ),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('确认勾选'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    if (!mounted || busy || widget.available[name] != content) return;
+    setState(() {
+      selected.add(name);
+      if (hideWarning) _hideContextWarning = true;
+    });
+    if (hideWarning) await widget.onHideContextWarning?.call();
+  }
 
   RegExpMatch? referenceToken(String text, int offset) {
     if (offset < 0 || offset > text.length) return null;
@@ -1401,15 +1460,10 @@ class LearningAiPanelState extends State<LearningAiPanel> {
                                                       .contains(entry.key),
                                                   onSelected: busy
                                                       ? null
-                                                      : (value) => setState(() {
-                                                            if (value) {
-                                                              selected.add(
-                                                                  entry.key);
-                                                            } else {
-                                                              selected.remove(
-                                                                  entry.key);
-                                                            }
-                                                          })),
+                                                      : (value) =>
+                                                          selectContext(
+                                                              entry.key,
+                                                              value)),
                                               IconButton(
                                                   tooltip: '预览${entry.key}',
                                                   visualDensity:

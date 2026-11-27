@@ -192,18 +192,6 @@ class RuntimeAdapter {
     }
     _process = process;
     var finished = false;
-    var previousHeap = <String, dynamic>{};
-    void expandHeap(Map<String, dynamic> snapshot) {
-      final heap = snapshot['heap'] as Map<String, dynamic>;
-      for (final key in heap.keys) {
-        if (heap[key] == null) {
-          heap[key] =
-              previousHeap[key] ?? (throw const FormatException('执行记录缺少前置对象'));
-        }
-      }
-      previousHeap = heap;
-    }
-
     final stdoutDone = Completer<void>();
     process.stdout
         .transform(utf8.decoder)
@@ -213,11 +201,6 @@ class RuntimeAdapter {
               if (_process != process) return;
               try {
                 final event = jsonDecode(line) as Map<String, dynamic>;
-                if (event['seq'] != null) {
-                  final before = event['before'];
-                  if (before is Map<String, dynamic>) expandHeap(before);
-                  expandHeap(event);
-                }
                 if (event['kind'] == 'finished') finished = true;
                 onEvent(event);
               } catch (e) {
@@ -229,9 +212,15 @@ class RuntimeAdapter {
               if (!stdoutDone.isCompleted) stdoutDone.complete();
               if (_process == process) onFailure('读取执行记录失败：$error');
             });
-    process.stderr.transform(utf8.decoder).listen((text) {
-      if (_process == process) onFailure(text);
-    });
+    // stderr may contain warnings from libraries or child processes.
+    void reportDiagnostic(String text) {
+      if (_process == process) onEvent({'kind': 'stderr', 'text': text});
+    }
+
+    process.stderr
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(reportDiagnostic,
+            onError: (Object error) => reportDiagnostic('读取运行诊断失败：$error\n'));
     process.exitCode.then((code) async {
       await stdoutDone.future;
       if (_process == process && !finished) {

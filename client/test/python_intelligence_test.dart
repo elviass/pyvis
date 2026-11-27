@@ -175,7 +175,7 @@ void main() {
     await realIo(tester, () async {
       await tester.tap(find.byTooltip('演示运行').first);
     });
-    expect(find.textContaining('运行前检查未通过'), findsOneWidget);
+    await waitForRealIo(tester, find.textContaining('运行前检查未通过'));
     expect(find.textContaining('helper.py:1:1'), findsOneWidget);
     expect(find.byType(LineTheater), findsNothing);
     final helper =
