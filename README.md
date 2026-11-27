@@ -72,3 +72,7 @@ Windows 的 Actions 产物 `Pyvis-Windows-x64` 包含自签测试 MSI、公开�
 - [Flutter 客户端](client/)包含编辑器、节点画布和平台工程。[Python 内核](runtime/pyvis_runtime/)负责执行记录和代码分析。
 - [Flutter 测试](client/test/)和[内核与画布测试](tests/)覆盖基础工作流。测试截图输出到 `client/build/test-artifacts/`。
 - [执行与回放协议](docs/architecture.md)、[节点图开发记录](docs/comfy-handoff.md)和[功能验收记录](docs/basic-acceptance.md)记录实现与验证细节。
+
+## 许可证
+
+Pyvis 自有源代码采用 [MIT 许可证](LICENSE)。随项目提供的第三方代码、图标、字体和模型适用各自的许可。相关声明见[界面资源与模型](client/assets/NOTICE.md)、[节点图渲染器](client/assets/graph/vendor/NOTICE.md)和 [Python 组件](runtime/pyvis_runtime/vendor/NOTICE.md)。
