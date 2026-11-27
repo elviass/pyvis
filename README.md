@@ -4,7 +4,7 @@
 
 Pyvis 是一款面向 Python 初学者和教学演示的图形化编辑器。你可以编写和运行代码，逐步观察变量如何变化、条件走了哪条分支、函数如何调用和返回。
 
-**v0.1.1 预览版** · Android · macOS · Windows
+**v0.1.2w 预览版** · Android · macOS · Windows
 
 ![Pyvis 桌面版界面预览](docs/desktop-preview.png)
 
